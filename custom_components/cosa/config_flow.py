@@ -42,10 +42,23 @@ async def validate_input(hass: HomeAssistant, data: Dict[str, Any]) -> Dict[str,
             status = await client.get_endpoint_status()
             endpoint_data = status.get("endpoint", {})
         else:
-            # If no endpoint_id provided, try to get first endpoint
-            # This might require a different API call to list endpoints
-            # For now, we'll just verify login works
-            endpoint_data = {}
+            # If no endpoint_id provided, try to get endpoints list
+            try:
+                endpoints = await client.list_endpoints()
+                if endpoints and len(endpoints) > 0:
+                    # Use first endpoint if available
+                    first_endpoint = endpoints[0]
+                    client._endpoint_id = first_endpoint.get("id") or first_endpoint.get("_id") or first_endpoint.get("endpoint")
+                    if client._endpoint_id:
+                        status = await client.get_endpoint_status(client._endpoint_id)
+                        endpoint_data = status.get("endpoint", {})
+                    else:
+                        endpoint_data = {}
+                else:
+                    endpoint_data = {}
+            except Exception:
+                # If list_endpoints fails, just verify login works
+                endpoint_data = {}
 
         await client.close()
 

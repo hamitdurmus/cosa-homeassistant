@@ -26,11 +26,15 @@ from .api import CosaAPIClient, CosaAPIError
 from .const import (
     DOMAIN,
     MODE_AWAY,
+    MODE_AUTO,
     MODE_CUSTOM,
     MODE_FROZEN,
     MODE_HOME,
+    MODE_SCHEDULE,
     MODE_SLEEP,
+    PRESET_AUTO,
     PRESET_CUSTOM,
+    PRESET_SCHEDULE,
     SCAN_INTERVAL,
     MIN_TEMP,
     MAX_TEMP,
@@ -99,11 +103,31 @@ class CosaDataUpdateCoordinator(DataUpdateCoordinator):
             }
         except CosaAPIError as err:
             _LOGGER.error("Error fetching COSA data: %s", err)
-            # Try to re-login on error
-            try:
-                await self.client.login()
-            except Exception:
-                pass
+            # Check if it's an authentication error
+            if "401" in str(err) or "expired" in str(err).lower() or "authentication" in str(err).lower():
+                _LOGGER.info("Authentication error detected, attempting to re-login")
+                try:
+                    await self.client.login()
+                    # Retry once after re-login
+                    status = await self.client.get_endpoint_status(self.endpoint_id)
+                    endpoint_data = status.get("endpoint", {})
+                    return {
+                        "temperature": endpoint_data.get("temperature"),
+                        "target_temperature": endpoint_data.get("targetTemperature"),
+                        "humidity": endpoint_data.get("humidity"),
+                        "combi_state": endpoint_data.get("combiState"),
+                        "option": endpoint_data.get("option"),
+                        "mode": endpoint_data.get("mode"),
+                        "target_temperatures": {
+                            "home": endpoint_data.get("targetTemperatures", {}).get("home"),
+                            "away": endpoint_data.get("targetTemperatures", {}).get("away"),
+                            "sleep": endpoint_data.get("targetTemperatures", {}).get("sleep"),
+                            "custom": endpoint_data.get("targetTemperatures", {}).get("custom"),
+                        },
+                    }
+                except Exception as retry_err:
+                    _LOGGER.error("Re-login failed: %s", retry_err)
+                    raise
             raise
 
 
@@ -121,6 +145,8 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
         PRESET_AWAY,
         PRESET_SLEEP,
         PRESET_CUSTOM,
+        PRESET_AUTO,
+        PRESET_SCHEDULE,
     ]
     _attr_min_temp = MIN_TEMP
     _attr_max_temp = MAX_TEMP
@@ -157,6 +183,15 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
     def preset_mode(self) -> Optional[str]:
         """Return current preset mode."""
         option = self.coordinator.data.get("option")
+        mode = self.coordinator.data.get("mode")
+        
+        # Check mode first (auto, schedule, manual)
+        if mode == "auto":
+            return PRESET_AUTO
+        elif mode == "schedule":
+            return PRESET_SCHEDULE
+        
+        # Then check option (for manual mode)
         if option == MODE_HOME:
             return PRESET_HOME
         elif option == MODE_AWAY:
@@ -165,6 +200,11 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
             return PRESET_SLEEP
         elif option == MODE_CUSTOM:
             return PRESET_CUSTOM
+        elif option == MODE_AUTO:
+            return PRESET_AUTO
+        elif option == MODE_SCHEDULE:
+            return PRESET_SCHEDULE
+        
         return None
 
     @property
@@ -248,6 +288,8 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
             PRESET_AWAY: MODE_AWAY,
             PRESET_SLEEP: MODE_SLEEP,
             PRESET_CUSTOM: MODE_CUSTOM,
+            PRESET_AUTO: MODE_AUTO,
+            PRESET_SCHEDULE: MODE_SCHEDULE,
         }
 
         option = option_map.get(preset_mode)
@@ -256,11 +298,21 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
             return
 
         try:
-            await self.coordinator.client.set_mode(
-                mode="manual",
-                option=option,
-                endpoint_id=self.coordinator.endpoint_id,
-            )
+            # Determine mode based on preset
+            if preset_mode in [PRESET_AUTO, PRESET_SCHEDULE]:
+                # For auto and schedule, mode should be the preset name
+                await self.coordinator.client.set_mode(
+                    mode=preset_mode,
+                    option=option,
+                    endpoint_id=self.coordinator.endpoint_id,
+                )
+            else:
+                # For manual presets (home, away, sleep, custom)
+                await self.coordinator.client.set_mode(
+                    mode="manual",
+                    option=option,
+                    endpoint_id=self.coordinator.endpoint_id,
+                )
             await self.coordinator.async_request_refresh()
         except CosaAPIError as err:
             _LOGGER.error("Error setting preset mode: %s", err)

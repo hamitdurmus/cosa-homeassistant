@@ -12,6 +12,7 @@ ENDPOINT_LOGIN = "/users/login"
 ENDPOINT_GET_ENDPOINT = "/endpoints/getEndpoint"
 ENDPOINT_SET_MODE = "/endpoints/setMode"
 ENDPOINT_SET_TARGET_TEMPERATURES = "/endpoints/setTargetTemperatures"
+ENDPOINT_LIST_ENDPOINTS = "/endpoints/list"
 
 # Headers
 USER_AGENT = "Cosa/1 CFNetwork/1498.700.2 Darwin/23.6.0"
@@ -23,6 +24,8 @@ MODE_SLEEP = "sleep"
 MODE_AWAY = "away"
 MODE_CUSTOM = "custom"
 MODE_FROZEN = "frozen"  # Off mode
+MODE_AUTO = "auto"
+MODE_SCHEDULE = "schedule"
 
 # Home Assistant Climate Modes
 HA_MODE_HEAT = "heat"
@@ -33,6 +36,8 @@ PRESET_HOME = "home"
 PRESET_SLEEP = "sleep"
 PRESET_AWAY = "away"
 PRESET_CUSTOM = "custom"
+PRESET_AUTO = "auto"
+PRESET_SCHEDULE = "schedule"
 
 # Temperature limits
 MIN_TEMP = 5

@@ -11,6 +11,7 @@ from .const import (
     ENDPOINT_GET_ENDPOINT,
     ENDPOINT_SET_MODE,
     ENDPOINT_SET_TARGET_TEMPERATURES,
+    ENDPOINT_LIST_ENDPOINTS,
     USER_AGENT,
     CONTENT_TYPE,
 )
@@ -34,6 +35,7 @@ class CosaAPIClient:
         self._endpoint_id = endpoint_id
         self._token: Optional[str] = None
         self._session: Optional[aiohttp.ClientSession] = None
+        self._retry_count = 3  # Retry count for failed requests
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -169,29 +171,42 @@ class CosaAPIClient:
         if not endpoint:
             raise CosaAPIError("Endpoint ID is required")
 
-        try:
-            session = await self._get_session()
-            url = f"{API_BASE_URL}{ENDPOINT_GET_ENDPOINT}"
+        for attempt in range(self._retry_count):
+            try:
+                session = await self._get_session()
+                url = f"{API_BASE_URL}{ENDPOINT_GET_ENDPOINT}"
 
-            payload = {"endpoint": endpoint}
-            headers = self._get_headers()
+                payload = {"endpoint": endpoint}
+                headers = self._get_headers()
 
-            async with session.post(url, json=payload, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data
-                else:
-                    error_text = await response.text()
-                    _LOGGER.error(
-                        "Get endpoint status failed with status %s: %s",
-                        response.status,
-                        error_text,
-                    )
-                    raise CosaAPIError(f"Get status failed: {response.status}")
+                async with session.post(url, json=payload, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data
+                    elif response.status == 401:
+                        # Token expired, try to re-login
+                        _LOGGER.warning("Token expired, attempting to re-login")
+                        await self.login()
+                        if attempt < self._retry_count - 1:
+                            continue
+                    else:
+                        error_text = await response.text()
+                        _LOGGER.error(
+                            "Get endpoint status failed with status %s: %s",
+                            response.status,
+                            error_text,
+                        )
+                        if attempt < self._retry_count - 1:
+                            continue
+                        raise CosaAPIError(f"Get status failed: {response.status}")
 
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Error getting endpoint status: %s", err)
-            raise CosaAPIError(f"Connection error: {err}") from err
+            except aiohttp.ClientError as err:
+                _LOGGER.error("Error getting endpoint status (attempt %d): %s", attempt + 1, err)
+                if attempt < self._retry_count - 1:
+                    continue
+                raise CosaAPIError(f"Connection error: {err}") from err
+
+        raise CosaAPIError("Failed to get endpoint status after retries")
 
     async def set_mode(
         self,
@@ -276,5 +291,57 @@ class CosaAPIClient:
 
         except aiohttp.ClientError as err:
             _LOGGER.error("Error setting target temperatures: %s", err)
+            raise CosaAPIError(f"Connection error: {err}") from err
+
+    async def list_endpoints(self) -> list[Dict[str, Any]]:
+        """List all endpoints for the user."""
+        if not self._token:
+            await self.login()
+
+        try:
+            session = await self._get_session()
+            url = f"{API_BASE_URL}{ENDPOINT_LIST_ENDPOINTS}"
+            headers = self._get_headers()
+
+            async with session.post(url, json={}, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    # Try different response formats
+                    if isinstance(data, list):
+                        return data
+                    elif "endpoints" in data:
+                        endpoints = data["endpoints"]
+                        return endpoints if isinstance(endpoints, list) else [endpoints]
+                    elif "endpoint" in data:
+                        endpoint = data["endpoint"]
+                        return endpoint if isinstance(endpoint, list) else [endpoint]
+                    elif "data" in data:
+                        data_list = data["data"]
+                        return data_list if isinstance(data_list, list) else [data_list]
+                    return []
+                elif response.status == 401:
+                    # Token expired, try to re-login
+                    _LOGGER.warning("Token expired, attempting to re-login")
+                    await self.login()
+                    # Retry once
+                    async with session.post(url, json={}, headers=self._get_headers()) as retry_response:
+                        if retry_response.status == 200:
+                            data = await retry_response.json()
+                            if isinstance(data, list):
+                                return data
+                            elif "endpoints" in data:
+                                return data["endpoints"] if isinstance(data["endpoints"], list) else [data["endpoints"]]
+                    raise CosaAPIError("Failed to list endpoints after re-login")
+                else:
+                    error_text = await response.text()
+                    _LOGGER.error(
+                        "List endpoints failed with status %s: %s",
+                        response.status,
+                        error_text,
+                    )
+                    raise CosaAPIError(f"List endpoints failed: {response.status}")
+
+        except aiohttp.ClientError as err:
+            _LOGGER.error("Error listing endpoints: %s", err)
             raise CosaAPIError(f"Connection error: {err}") from err
 
