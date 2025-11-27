@@ -7,7 +7,7 @@ Bu projeye katkıda bulunmak istediğiniz için teşekkürler! İşte nasıl ba�
 1. Repository'yi fork edin
 2. Fork'unuzu klonlayın:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/cosa-homeassistant.git
+   git clone https://github.com/hamitdurmus/cosa-homeassistant.git
    cd cosa-homeassistant
    ```
 3. Home Assistant geliştirme ortamınızı hazırlayın
