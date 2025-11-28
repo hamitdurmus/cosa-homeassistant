@@ -17,9 +17,9 @@ _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("username"): str,
+        vol.Required("username", description="Email veya kullanıcı adı"): str,
         vol.Required("password"): str,
-        vol.Optional("endpoint_id"): str,
+        vol.Optional("endpoint_id", description="Endpoint ID (opsiyonel - otomatik tespit edilebilir)"): str,
     }
 )
 

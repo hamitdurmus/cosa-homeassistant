@@ -82,20 +82,32 @@ class CosaAPIClient:
                             data = await response.json()
                             
                             # Try to extract token from various response formats
+                            # Note: API uses authToken (camelCase) as primary format
                             token = None
-                            if "token" in data:
+                            if "authToken" in data:
+                                token = data["authToken"]
+                            elif "token" in data:
                                 token = data["token"]
                             elif "authtoken" in data:
                                 token = data["authtoken"]
                             elif "data" in data:
                                 if isinstance(data["data"], dict):
-                                    token = data["data"].get("token") or data["data"].get("authtoken")
+                                    token = (
+                                        data["data"].get("authToken") or
+                                        data["data"].get("token") or
+                                        data["data"].get("authtoken")
+                                    )
                                 elif isinstance(data["data"], str):
                                     token = data["data"]
                             elif "access_token" in data:
                                 token = data["access_token"]
                             elif "accessToken" in data:
                                 token = data["accessToken"]
+
+                            # Log response for debugging if token not found
+                            if not token:
+                                _LOGGER.debug("Response data keys: %s", list(data.keys()) if isinstance(data, dict) else "Not a dict")
+                                _LOGGER.debug("Response preview: %s", str(data)[:200] if data else "Empty response")
 
                             if token:
                                 self._token = token
@@ -159,8 +171,9 @@ class CosaAPIClient:
         if not self._token:
             raise CosaAPIError("Not authenticated. Please login first.")
 
+        # API expects authToken (camelCase) in headers
         return {
-            "authtoken": self._token,
+            "authToken": self._token,
             "User-Agent": USER_AGENT,
             "Content-Type": CONTENT_TYPE,
         }
@@ -302,10 +315,31 @@ class CosaAPIClient:
             session = await self._get_session()
             url = f"{API_BASE_URL}{ENDPOINT_LIST_ENDPOINTS}"
             headers = self._get_headers()
+            last_status = None
 
-            async with session.post(url, json={}, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
+            # Try GET first (as in other repository), then POST if needed
+            for method in ["get", "post"]:
+                try:
+                    if method == "get":
+                        async with session.get(url, headers=headers) as response:
+                            last_status = response.status
+                            if last_status == 200:
+                                data = await response.json()
+                            elif last_status == 401:
+                                # Token expired, break to handle below
+                                break
+                            else:
+                                # Try POST method for other status codes
+                                continue
+                    else:
+                        async with session.post(url, json={}, headers=headers) as response:
+                            last_status = response.status
+                            if last_status == 200:
+                                data = await response.json()
+                            else:
+                                error_text = await response.text()
+                                raise CosaAPIError(f"List endpoints failed: {last_status} - {error_text}")
+                    
                     # Try different response formats
                     if isinstance(data, list):
                         return data
@@ -319,27 +353,30 @@ class CosaAPIClient:
                         data_list = data["data"]
                         return data_list if isinstance(data_list, list) else [data_list]
                     return []
-                elif response.status == 401:
-                    # Token expired, try to re-login
-                    _LOGGER.warning("Token expired, attempting to re-login")
-                    await self.login()
-                    # Retry once
-                    async with session.post(url, json={}, headers=self._get_headers()) as retry_response:
-                        if retry_response.status == 200:
-                            data = await retry_response.json()
-                            if isinstance(data, list):
-                                return data
-                            elif "endpoints" in data:
-                                return data["endpoints"] if isinstance(data["endpoints"], list) else [data["endpoints"]]
-                    raise CosaAPIError("Failed to list endpoints after re-login")
-                else:
-                    error_text = await response.text()
-                    _LOGGER.error(
-                        "List endpoints failed with status %s: %s",
-                        response.status,
-                        error_text,
-                    )
-                    raise CosaAPIError(f"List endpoints failed: {response.status}")
+                    
+                except CosaAPIError:
+                    raise
+                except Exception as e:
+                    if method == "get":
+                        _LOGGER.debug("GET method failed, trying POST: %s", e)
+                        continue
+                    raise
+            
+            # Handle 401 - token expired
+            if last_status == 401:
+                _LOGGER.warning("Token expired, attempting to re-login")
+                await self.login()
+                # Retry once with POST
+                async with session.post(url, json={}, headers=self._get_headers()) as retry_response:
+                    if retry_response.status == 200:
+                        data = await retry_response.json()
+                        if isinstance(data, list):
+                            return data
+                        elif "endpoints" in data:
+                            return data["endpoints"] if isinstance(data["endpoints"], list) else [data["endpoints"]]
+                raise CosaAPIError("Failed to list endpoints after re-login")
+            elif last_status:
+                raise CosaAPIError(f"List endpoints failed with status {last_status}")
 
         except aiohttp.ClientError as err:
             _LOGGER.error("Error listing endpoints: %s", err)
