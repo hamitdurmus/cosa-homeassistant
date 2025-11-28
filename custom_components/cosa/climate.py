@@ -16,6 +16,7 @@ from homeassistant.components.climate.const import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -52,16 +53,18 @@ async def async_setup_entry(
     """Set up COSA climate platform."""
     coordinator = CosaDataUpdateCoordinator(hass, config_entry)
     
+    # Create entity first
+    entity = CosaClimate(coordinator, config_entry)
+    async_add_entities([entity])
+    _LOGGER.info("COSA climate entity created: %s", entity.unique_id)
+    
+    # Then try to refresh data
     try:
         await coordinator.async_config_entry_first_refresh()
+        _LOGGER.info("COSA coordinator refresh successful")
     except Exception as err:
-        _LOGGER.error("Failed to refresh coordinator during setup: %s", err)
-        # Still create entity even if first refresh fails
-        # It will retry on next update
-        pass
-
-    async_add_entities([CosaClimate(coordinator, config_entry)])
-    _LOGGER.info("COSA climate entity added successfully")
+        _LOGGER.error("Failed to refresh coordinator during setup: %s", err, exc_info=True)
+        # Entity is still created, it will retry on next update
 
 
 class CosaDataUpdateCoordinator(DataUpdateCoordinator):
@@ -217,8 +220,16 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
         """Initialize the climate device."""
         super().__init__(coordinator)
         self._config_entry = config_entry
-        self._attr_name = f"COSA Termostat"
-        self._attr_unique_id = f"{config_entry.entry_id}_climate"
+        self._attr_name = "COSA Termostat"
+        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_climate"
+        
+        # Set device info for proper device registry
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, config_entry.entry_id)},
+            name=f"COSA Termostat ({config_entry.data.get('username', 'Unknown')})",
+            manufacturer="COSA",
+            model="Smart Thermostat",
+        )
 
     @property
     def current_temperature(self) -> Optional[float]:
