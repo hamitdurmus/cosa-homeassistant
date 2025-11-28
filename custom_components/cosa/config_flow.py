@@ -107,6 +107,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(user_input["username"])
             self._abort_if_unique_id_configured()
 
+            # Add endpoint_id to user_input if it was found
+            if info.get("endpoint_id"):
+                user_input["endpoint_id"] = info["endpoint_id"]
+
             return self.async_create_entry(title=info["title"], data=user_input)
 
         return self.async_show_form(

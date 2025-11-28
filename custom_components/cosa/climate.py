@@ -51,9 +51,17 @@ async def async_setup_entry(
 ) -> None:
     """Set up COSA climate platform."""
     coordinator = CosaDataUpdateCoordinator(hass, config_entry)
-    await coordinator.async_config_entry_first_refresh()
+    
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception as err:
+        _LOGGER.error("Failed to refresh coordinator during setup: %s", err)
+        # Still create entity even if first refresh fails
+        # It will retry on next update
+        pass
 
     async_add_entities([CosaClimate(coordinator, config_entry)])
+    _LOGGER.info("COSA climate entity added successfully")
 
 
 class CosaDataUpdateCoordinator(DataUpdateCoordinator):
@@ -83,9 +91,60 @@ class CosaDataUpdateCoordinator(DataUpdateCoordinator):
             self.endpoint_id = self.config_entry.data.get("endpoint_id")
             await self.client.login()
 
+        # If endpoint_id is not set, try to get it from API
+        if not self.endpoint_id:
+            try:
+                endpoints = await self.client.list_endpoints()
+                if endpoints and len(endpoints) > 0:
+                    first_endpoint = endpoints[0]
+                    self.endpoint_id = (
+                        first_endpoint.get("id") or
+                        first_endpoint.get("_id") or
+                        first_endpoint.get("endpoint")
+                    )
+                    _LOGGER.info("Auto-detected endpoint ID: %s", self.endpoint_id)
+                else:
+                    _LOGGER.error("No endpoints found for user")
+                    raise CosaAPIError("No endpoints found")
+            except Exception as err:
+                _LOGGER.error("Failed to get endpoint ID: %s", err)
+                raise CosaAPIError(f"Failed to get endpoint ID: {err}") from err
+
+        if not self.endpoint_id:
+            raise CosaAPIError("Endpoint ID is required but not available")
+
         try:
             status = await self.client.get_endpoint_status(self.endpoint_id)
-            endpoint_data = status.get("endpoint", {})
+            
+            # Handle different response formats
+            endpoint_data = {}
+            if isinstance(status, dict):
+                endpoint_data = status.get("endpoint", {})
+                # If endpoint is not in response, maybe the response itself is the endpoint data
+                if not endpoint_data and "temperature" in status:
+                    endpoint_data = status
+            elif isinstance(status, list) and len(status) > 0:
+                endpoint_data = status[0]
+            
+            _LOGGER.debug("Endpoint data received: %s", endpoint_data)
+            
+            if not endpoint_data:
+                _LOGGER.warning("Empty endpoint data received. Full response: %s", status)
+                # Return default values to prevent entity creation failure
+                return {
+                    "temperature": None,
+                    "target_temperature": None,
+                    "humidity": None,
+                    "combi_state": "off",
+                    "option": None,
+                    "mode": None,
+                    "target_temperatures": {
+                        "home": None,
+                        "away": None,
+                        "sleep": None,
+                        "custom": None,
+                    },
+                }
 
             return {
                 "temperature": endpoint_data.get("temperature"),
