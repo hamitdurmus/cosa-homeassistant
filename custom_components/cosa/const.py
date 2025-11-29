@@ -13,6 +13,7 @@ ENDPOINT_GET_ENDPOINT = "/endpoints/getEndpoint"
 ENDPOINT_SET_MODE = "/endpoints/setMode"
 ENDPOINT_SET_TARGET_TEMPERATURES = "/endpoints/setTargetTemperatures"
 ENDPOINT_LIST_ENDPOINTS = "/endpoints/list"
+ENDPOINT_USER_INFO = "/users/getInfo"
 
 # Headers
 USER_AGENT = "Cosa/1 CFNetwork/1498.700.2 Darwin/23.6.0"

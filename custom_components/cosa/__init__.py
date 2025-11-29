@@ -20,11 +20,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {}
 
+    _LOGGER.debug("Setting up COSA entry: %s", entry.entry_id)
     # Create coordinator and store it
     from .climate import CosaDataUpdateCoordinator
 
     coordinator = CosaDataUpdateCoordinator(hass, entry)
     hass.data[DOMAIN][entry.entry_id]["coordinator"] = coordinator
+    _LOGGER.debug("Coordinator created for entry %s", entry.entry_id)
 
     # Forward the setup to all platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

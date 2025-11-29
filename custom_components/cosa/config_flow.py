@@ -18,8 +18,9 @@ _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("username", description="Email veya kullanıcı adı"): str,
-        vol.Required("password"): str,
+        # Allow token-only flows so users don't need to provide username/password
+        vol.Optional("username", description="Email veya kullanıcı adı"): str,
+        vol.Optional("password"): str,
         vol.Optional("endpoint_id", description="Endpoint ID (opsiyonel - otomatik tespit edilebilir)"): str,
         vol.Optional("token", description="Auth token (opsiyonel - kullanıcının proxy veya dış token'ı varsa)"): str,
     }
@@ -37,10 +38,21 @@ async def validate_input(hass: HomeAssistant, data: Dict[str, Any]) -> Dict[str,
     )
 
     try:
-        # If token is not provided, try to login
+        # Validate credentials: either token provided, or username+password set
+        if not data.get("token") and not (data.get("username") and data.get("password")):
+            raise InvalidAuth("Please provide token or username/password")
+
+        # If token is not provided, try to login using username/password
         if not data.get("token"):
             if not await client.login():
                 raise InvalidAuth
+        else:
+            # Token provided, validate by fetching user info
+            try:
+                await client.get_user_info()
+            except Exception as err:
+                _LOGGER.error("Token validation failed: %s", err)
+                raise InvalidAuth from err
 
         # Get endpoint status and name to verify connection and store the device name
         device_name = None
@@ -89,7 +101,7 @@ async def validate_input(hass: HomeAssistant, data: Dict[str, Any]) -> Dict[str,
         # Return info that will be stored in the config entry
         # Include device_name if we detected one for nicer device naming later
         entry_data = {
-            "title": f"COSA Termostat ({data['username']})",
+            "title": f"COSA Termostat ({data.get('username') or data.get('token') or 'COSA'})",
             "endpoint_id": client._endpoint_id or data.get("endpoint_id", ""),
         }
         if device_name:
@@ -101,6 +113,10 @@ async def validate_input(hass: HomeAssistant, data: Dict[str, Any]) -> Dict[str,
         msg = str(err).lower()
         if "invalid" in msg and ("auth" in msg or "username" in msg or "credentials" in msg):
             raise InvalidAuth from err
+        # If server returned 404, it indicates invalid endpoint/path — treat as cannot connect
+        if "status 404" in msg or "404" in msg:
+            _LOGGER.warning("Login attempt returned 404 — check the API base URL or endpoint paths; consider using a token if available")
+            raise CannotConnect from err
         raise CannotConnect from err
     except Exception as err:
         _LOGGER.error("Unexpected error during validation: %s", err)
@@ -135,8 +151,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.exception("Unexpected exception")
             errors["base"] = "unknown"
         else:
-            # Check if already configured
-            await self.async_set_unique_id(user_input["username"])
+            # Check if already configured: use token or username as unique id
+            unique_id = user_input.get("token") or user_input.get("username")
+            await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
 
             # Add endpoint_id to user_input if it was found

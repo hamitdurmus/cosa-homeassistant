@@ -25,7 +25,13 @@ api_loader = importlib.machinery.SourceFileLoader('custom_components.cosa.api', 
 api_mod = api_loader.load_module()
 sys.modules['custom_components.cosa.api'] = api_mod
 
+climate_path = os.path.join(package_root, 'cosa', 'climate.py')
+climate_loader = importlib.machinery.SourceFileLoader('custom_components.cosa.climate', climate_path)
+climate_mod = climate_loader.load_module()
+sys.modules['custom_components.cosa.climate'] = climate_mod
+
 from custom_components.cosa.api import CosaAPIClient
+from custom_components.cosa.climate import CosaClimate
 
 
 class MockResponse:
@@ -102,6 +108,19 @@ def mock_post_list_endpoints(url, json_payload=None, headers=None):
     return MockResponse(payload, status=200)
 
 
+def mock_post_get_user_info(url, json_payload=None, headers=None):
+    payload = {
+        "user": {
+            "name": "Abdulhamit",
+            "email": "hamitdurmus@gmail.com",
+            "provider": "cosa",
+            "id": "66e06d24539c431400acb37b",
+        },
+        "ok": 1,
+    }
+    return MockResponse(payload, status=200)
+
+
 async def run_test():
     # Basic flow: login -> list_endpoints -> get_endpoint_status
     client = CosaAPIClient(username="test@example.com", password="testpass")
@@ -163,6 +182,61 @@ async def run_test():
         assert eps2 and isinstance(eps2, list)
         assert eps2[0]['id'] == '66e06d3edac55e12009be544'
         await client2.close()
+
+    # Token-only flow test
+    client3 = CosaAPIClient(token='SAMPLETOKEN123')
+
+    def dispatch_token_post(url, *args, **kwargs):
+        json_payload = kwargs.get('json') or kwargs.get('json_payload')
+        headers = kwargs.get('headers')
+        if url.endswith('/users/getInfo'):
+            return mock_post_get_user_info(url, json_payload=json_payload, headers=headers)
+        if url.endswith('/endpoints/getEndpoints') or url.endswith('/endpoints/list'):
+            return mock_post_list_endpoints(url, json_payload=json_payload, headers=headers)
+        return mock_post_get_endpoint(url, json_payload=json_payload, headers=headers)
+
+    with patch('aiohttp.ClientSession') as MockSession:
+        mock_sess_instance = MockSession.return_value
+        mock_sess_instance.post = dispatch_token_post
+        mock_sess_instance.get = lambda *args, **kwargs: mock_post_list_endpoints(args[0], json_payload=None, headers=kwargs.get('headers'))
+
+        await client3.get_user_info()
+        eps3 = await client3.list_endpoints()
+        print('Token only list endpoints:', eps3)
+        assert eps3 and isinstance(eps3, list)
+        assert eps3[0]['id'] == '66e06d3edac55e12009be544'
+
+    # Simple coordinator + entity mapping test
+    class DummyCoordinator:
+        def __init__(self, data):
+            self.data = data
+            self.client = None
+            self.endpoint_id = '66e06d3edac55e12009be544'
+
+    class DummyConfigEntry:
+        def __init__(self):
+            self.entry_id = 'entry_1'
+            self.data = {'username': 'test@example.com', 'device_name': 'Evim'}
+
+    coord_data = {
+        'temperature': 26,
+        'target_temperature': 25.8,
+        'humidity': 54.8,
+        'combi_state': 'on',
+        'option': 'home',
+        'mode': 'schedule',
+        'target_temperatures': {'home': 26, 'away': 15, 'sleep': 26.3, 'custom': 20},
+        'name': 'Evim',
+        'operation_mode': 'heating',
+    }
+
+    coord = DummyCoordinator(coord_data)
+    entry = DummyConfigEntry()
+    entity = CosaClimate(coord, entry)
+    # Basic expectations
+    assert entity.current_temperature == 26
+    assert entity.target_temperature == 25.8
+    assert entity.preset_mode == 'schedule' or entity.preset_mode == 'auto' or entity.preset_mode == 'home'
 
 
 if __name__ == '__main__':
