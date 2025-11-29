@@ -1,4 +1,5 @@
 """Constants for COSA integration."""
+from datetime import timedelta
 
 DOMAIN = "cosa"
 PLATFORM = "climate"
@@ -46,5 +47,5 @@ MAX_TEMP = 32
 TEMP_STEP = 0.1
 
 # Update interval
-SCAN_INTERVAL = 60  # seconds
+SCAN_INTERVAL = timedelta(seconds=60)  # seconds; DataUpdateCoordinator expects a timedelta
 
