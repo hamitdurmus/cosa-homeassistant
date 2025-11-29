@@ -264,19 +264,15 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
         """Return current HVAC mode or None if no data yet."""
         if not self.coordinator.data:
             return None
-        combi_state = self.coordinator.data.get("combi_state")
+
         mode = self.coordinator.data.get("mode")
         option = self.coordinator.data.get("option")
-
-        # If combi_state is "off", it's OFF
-        if combi_state == "off":
-            return HVACMode.OFF
 
         # If mode is "manual" and option is "frozen", it's OFF
         if mode == "manual" and option == "frozen":
             return HVACMode.OFF
 
-        # Otherwise, it's HEAT
+        # Otherwise, it's HEAT (assuming it's on)
         return HVACMode.HEAT
 
     @property
@@ -330,11 +326,16 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
                 token=self._config_entry.data.get("token"),
                 session=async_get_clientsession(self.hass),
             )
-        try:
-            if not getattr(self.coordinator.client, "_token", None):
+
+        # Always try to login if no token
+        if not getattr(self.coordinator.client, "_token", None):
+            try:
                 await self.coordinator.client.login()
-        except CosaAPIError:
-            _LOGGER.debug("Failed to login while ensuring the client exists")
+            except CosaAPIError as err:
+                _LOGGER.error("Failed to login while ensuring client: %s", err)
+                raise
+
+        # Ensure endpoint_id is available
         if not self.coordinator.endpoint_id:
             try:
                 endpoints = await self.coordinator.client.list_endpoints()
@@ -345,8 +346,12 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
                         self.coordinator.client._endpoint_id = self.coordinator.endpoint_id
                     except Exception:
                         pass
-            except CosaAPIError:
-                _LOGGER.debug("Failed to list endpoints while ensuring the client exists")
+                else:
+                    raise CosaAPIError("No endpoints found")
+            except CosaAPIError as err:
+                _LOGGER.error("Failed to get endpoint_id: %s", err)
+                raise
+
         return self.coordinator.client
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
@@ -360,8 +365,7 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
         try:
             client = await self._ensure_coordinator_client()
 
-            # For COSA, we might need to set mode with temperature
-            # Try setting the temperature via mode change first
+            # For COSA, set temperature via mode change
             option_map = {
                 PRESET_HOME: MODE_HOME,
                 PRESET_AWAY: MODE_AWAY,
@@ -377,18 +381,6 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
                 temperature=temperature,
                 endpoint_id=self.coordinator.endpoint_id,
             )
-
-            # Also try to set target temperatures if available
-            try:
-                await client.set_target_temperatures(
-                    home_temp=temperature if current_preset == PRESET_HOME else (self.coordinator.data or {}).get("target_temperatures", {}).get("home", 20),
-                    away_temp=temperature if current_preset == PRESET_AWAY else (self.coordinator.data or {}).get("target_temperatures", {}).get("away", 15),
-                    sleep_temp=temperature if current_preset == PRESET_SLEEP else (self.coordinator.data or {}).get("target_temperatures", {}).get("sleep", 18),
-                    custom_temp=temperature if current_preset == PRESET_CUSTOM else (self.coordinator.data or {}).get("target_temperatures", {}).get("custom", 20),
-                    endpoint_id=self.coordinator.endpoint_id,
-                )
-            except Exception as temp_err:
-                _LOGGER.debug("Failed to set target temperatures, but mode was set: %s", temp_err)
 
             await self.coordinator.async_request_refresh()
         except CosaAPIError as err:
