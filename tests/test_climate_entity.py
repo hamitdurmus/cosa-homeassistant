@@ -104,11 +104,15 @@ async def test_climate_sync_wrappers_do_not_raise():
     async def fake_set_mode(**kwargs):
         return True
 
+    async def fake_set_option(**kwargs):
+        return True
+
     async def fake_set_target_temperatures(**kwargs):
         return True
 
     client = SimpleNamespace(
         set_mode=AsyncMock(side_effect=fake_set_mode),
+        set_option=AsyncMock(side_effect=fake_set_option),
         set_target_temperatures=AsyncMock(side_effect=fake_set_target_temperatures),
         login=AsyncMock(return_value=None),
         _token="fake_token",
@@ -146,14 +150,14 @@ async def test_climate_sync_wrappers_do_not_raise():
     await asyncio.sleep(0)
 
     # Verify async client calls were invoked
-    assert client.set_mode.called
+    assert client.set_option.called
 
     # Call synchronous wrappers (should not raise and should call underlying client)
     e.set_temperature(**{ATTR_TEMPERATURE: 22})
     e.set_hvac_mode(HVACMode.HEAT)
     e.set_preset_mode(PRESET_HOME)
     await asyncio.sleep(0)
-    assert client.set_mode.called
+    assert client.set_option.called
 
 
 def test_climate_properties_guard_none():
@@ -176,11 +180,15 @@ async def test_coordinator_client_is_created_if_none(monkeypatch):
     async def fake_set_mode(**kwargs):
         return True
 
+    async def fake_set_option(**kwargs):
+        return True
+
     async def fake_set_target_temperatures(**kwargs):
         return True
 
     fake_client = SimpleNamespace(
         set_mode=AsyncMock(side_effect=fake_set_mode),
+        set_option=AsyncMock(side_effect=fake_set_option),
         set_target_temperatures=AsyncMock(side_effect=fake_set_target_temperatures),
         list_endpoints=AsyncMock(return_value=[{"id": "end_001"}]),
         login=AsyncMock(return_value=None),

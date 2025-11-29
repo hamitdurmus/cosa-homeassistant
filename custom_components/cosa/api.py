@@ -12,7 +12,6 @@ from .const import (
     ENDPOINT_SET_MODE,
     ENDPOINT_SET_TARGET_TEMPERATURES,
     ENDPOINT_LIST_ENDPOINTS,
-    ENDPOINT_USER_INFO,
     USER_AGENT,
     CONTENT_TYPE,
 )
@@ -31,8 +30,8 @@ class CosaAPIClient:
 
     def __init__(
         self,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
         endpoint_id: Optional[str] = None,
         token: Optional[str] = None,
         session: Optional[aiohttp.ClientSession] = None,
@@ -66,16 +65,12 @@ class CosaAPIClient:
 
     async def close(self):
         """Close the session."""
-        if self._session and not getattr(self._session, "closed", False) and self._own_session:
+        if self._session and not self._session.closed and self._own_session:
             # Only close if we created the session in _get_session; don't close a session
             # passed in by Home Assistant (async_get_clientsession)
-            _LOGGER.debug("Closing owned session for CosaAPIClient")
             await self._session.close()
             self._session = None
             self._own_session = False
-        else:
-            # We do not close a session we don't own
-            _LOGGER.debug("Not closing session: own=%s, closed=%s", self._own_session, getattr(self._session, "closed", None))
 
     async def login(self) -> bool:
         """Login and get authentication token."""
@@ -105,7 +100,6 @@ class CosaAPIClient:
                     }
 
                     _LOGGER.debug("Attempting login to %s with payload keys: %s", url, list(payload.keys()))
-                    # Primary attempt
                     async with session.post(url, json=payload, headers=headers) as response:
                         _LOGGER.debug("Login response status %s from %s", response.status, url)
                         if response.status == 200:
@@ -184,66 +178,12 @@ class CosaAPIClient:
                             error_text = await response.text()
                             _LOGGER.error("Invalid credentials: %s", error_text)
                             raise CosaAPIError("Invalid username or password")
-                        elif response.status == 404:
-                            # Try a fallback base URL (some APIs don't include /api in base)
-                            alt_base = API_BASE_URL
-                            if API_BASE_URL.endswith("/api"):
-                                alt_base = API_BASE_URL[: -len("/api")]
-                            alt_url = f"{alt_base}{endpoint}"
-                            _LOGGER.debug("Received 404 from %s, trying alt URL %s", url, alt_url)
-                            async with session.post(alt_url, json=payload, headers=headers) as alt_response:
-                                _LOGGER.debug("Alt URL response status %s from %s", alt_response.status, alt_url)
-                                if alt_response.status == 200:
-                                    data = await alt_response.json()
-                                    token = find_token(data)
-                                elif alt_response.status == 401:
-                                    error_text = await alt_response.text()
-                                    _LOGGER.error("Invalid credentials (alt): %s", error_text)
-                                    raise CosaAPIError("Invalid username or password")
-                                else:
-                                    error_text = await alt_response.text()
-                                    _LOGGER.debug("Alt login attempt failed with status %s: %s", alt_response.status, error_text)
-                                    last_error = f"Status {alt_response.status}: {error_text}"
-                                    continue
                         else:
                             error_text = await response.text()
                             _LOGGER.debug("Login response status %s from %s", response.status, url)
                             _LOGGER.debug(
                                 "Login attempt failed with status %s: %s", response.status, error_text
                             )
-                            # If 404, try an alternate base by stripping '/api' if present
-                            if response.status == 404 and API_BASE_URL.endswith("/api"):
-                                alt_base = API_BASE_URL[: -len("/api")]
-                                alt_url = f"{alt_base}{endpoint}"
-                                _LOGGER.debug("Received 404 from %s, trying alt URL %s", url, alt_url)
-                                try:
-                                    async with session.post(alt_url, json=payload, headers=headers) as alt_response:
-                                        if alt_response.status == 200:
-                                            data = await alt_response.json()
-                                            token = find_token(data)
-                                            if token:
-                                                self._token = token
-                                                if not self._endpoint_id:
-                                                    found_id = find_endpoint_id(data)
-                                                    if found_id:
-                                                        self._endpoint_id = found_id
-                                                _LOGGER.info("Successfully logged in to COSA API")
-                                                return True
-                                            else:
-                                                _LOGGER.debug("Token not found in alt response from %s", alt_url)
-                                                continue
-                                        elif alt_response.status == 401:
-                                            error_text = await alt_response.text()
-                                            _LOGGER.error("Invalid credentials (alt): %s", error_text)
-                                            raise CosaAPIError("Invalid username or password")
-                                        else:
-                                            alt_text = await alt_response.text()
-                                            last_error = f"Status {alt_response.status}: {alt_text}"
-                                            continue
-                                except aiohttp.ClientError as err:
-                                    _LOGGER.debug("Error connecting to alt login URL %s: %s", alt_url, err)
-                                    last_error = f"Connection error: {err}"
-                                    continue
                             last_error = f"Status {response.status}: {error_text}"
                             continue
 
@@ -306,32 +246,6 @@ class CosaAPIClient:
                         await self.login()
                         if attempt < self._retry_count - 1:
                             continue
-                    elif response.status == 404:
-                        # Try fallback base
-                        alt_base = API_BASE_URL
-                        if API_BASE_URL.endswith("/api"):
-                            alt_base = API_BASE_URL[: -len("/api")]
-                        alt_url = f"{alt_base}{ENDPOINT_GET_ENDPOINT}"
-                        _LOGGER.debug("Received 404 from %s, trying alt URL %s", url, alt_url)
-                        async with session.post(alt_url, json=payload, headers=headers) as alt_response:
-                            if alt_response.status == 200:
-                                data = await alt_response.json()
-                                return data
-                            elif alt_response.status == 401:
-                                _LOGGER.warning("Token expired (alt URL), attempting to re-login")
-                                await self.login()
-                                if attempt < self._retry_count - 1:
-                                    continue
-                            else:
-                                error_text = await alt_response.text()
-                                _LOGGER.error(
-                                    "Alt get endpoint failed with status %s: %s",
-                                    alt_response.status,
-                                    error_text,
-                                )
-                                if attempt < self._retry_count - 1:
-                                    continue
-                                raise CosaAPIError(f"Get status failed: {alt_response.status}")
                     else:
                         error_text = await response.text()
                         _LOGGER.error(
@@ -339,28 +253,6 @@ class CosaAPIClient:
                             response.status,
                             error_text,
                         )
-                        # If 404 try alternate base by stripping '/api'
-                        if response.status == 404 and API_BASE_URL.endswith("/api"):
-                            alt_base = API_BASE_URL[: -len("/api")]
-                            alt_url = f"{alt_base}{ENDPOINT_GET_ENDPOINT}"
-                            _LOGGER.debug("Received 404 from %s, trying alt URL %s", url, alt_url)
-                            async with session.post(alt_url, json=payload, headers=headers) as alt_response:
-                                if alt_response.status == 200:
-                                    data = await alt_response.json()
-                                    if isinstance(data, dict) and "data" in data and isinstance(data["data"], dict):
-                                        nested = data.get("data")
-                                        if "endpoint" in nested or "endpoints" in nested or "temperature" in nested:
-                                            return nested
-                                    return data
-                                if alt_response.status == 401:
-                                    _LOGGER.warning("Token expired, attempting to re-login")
-                                    await self.login()
-                                    if attempt < self._retry_count - 1:
-                                        continue
-                                alt_text = await alt_response.text()
-                                if attempt < self._retry_count - 1:
-                                    continue
-                                raise CosaAPIError(f"Get status failed: {alt_response.status}")
                         if attempt < self._retry_count - 1:
                             continue
                         raise CosaAPIError(f"Get status failed: {response.status}")
@@ -377,7 +269,6 @@ class CosaAPIClient:
         self,
         mode: str,
         option: str,
-        temperature: Optional[float] = None,
         endpoint_id: Optional[str] = None,
     ) -> bool:
         """Set endpoint mode."""
@@ -394,8 +285,6 @@ class CosaAPIClient:
                 "mode": mode,
                 "option": option,
             }
-            if temperature is not None:
-                payload["temperature"] = temperature
 
             headers = self._get_headers()
             headers["provider"] = "cosa"
@@ -410,21 +299,47 @@ class CosaAPIClient:
                     _LOGGER.error(
                         "Set mode failed with status %s: %s", response.status, error_text
                     )
-                    # If we get 404, try alternative base (strip '/api')
-                    if response.status == 404 and API_BASE_URL.endswith("/api"):
-                        alt_base = API_BASE_URL[: -len("/api")]
-                        alt_url = f"{alt_base}{ENDPOINT_SET_MODE}"
-                        _LOGGER.debug("Received 404 from %s, trying alt URL %s", url, alt_url)
-                        async with session.post(alt_url, json=payload, headers=headers) as alt_response:
-                            if alt_response.status == 200:
-                                _LOGGER.info("Successfully set mode (alt) to %s", option)
-                                return True
-                            alt_text = await alt_response.text()
-                            raise CosaAPIError(f"Set mode failed: {alt_response.status}: {alt_text}")
                     raise CosaAPIError(f"Set mode failed: {response.status}")
 
         except aiohttp.ClientError as err:
             _LOGGER.error("Error setting mode: %s", err)
+            raise CosaAPIError(f"Connection error: {err}") from err
+
+    async def set_option(
+        self,
+        option: str,
+        endpoint_id: Optional[str] = None,
+    ) -> bool:
+        """Set endpoint option."""
+        endpoint = endpoint_id or self._endpoint_id
+        if not endpoint:
+            raise CosaAPIError("Endpoint ID is required")
+
+        try:
+            session = await self._get_session()
+            url = f"{API_BASE_URL}/endpoints/setOption"
+
+            payload = {
+                "endpoint": endpoint,
+                "option": option,
+            }
+
+            headers = self._get_headers()
+            headers["provider"] = "cosa"
+
+            async with session.post(url, json=payload, headers=headers) as response:
+                if response.status == 200:
+                    _LOGGER.info("Successfully set option to %s", option)
+                    return True
+                else:
+                    error_text = await response.text()
+                    _LOGGER.error(
+                        "Set option failed with status %s: %s", response.status, error_text
+                    )
+                    raise CosaAPIError(f"Set option failed: {response.status}")
+
+        except aiohttp.ClientError as err:
+            _LOGGER.error("Error setting option: %s", err)
             raise CosaAPIError(f"Connection error: {err}") from err
 
     async def set_target_temperatures(
@@ -455,6 +370,7 @@ class CosaAPIClient:
             }
 
             headers = self._get_headers()
+            headers["provider"] = "cosa"
 
             async with session.post(url, json=payload, headers=headers) as response:
                 if response.status == 200:
@@ -467,17 +383,6 @@ class CosaAPIClient:
                         response.status,
                         error_text,
                     )
-                    # If 404, try alternate base
-                    if response.status == 404 and API_BASE_URL.endswith("/api"):
-                        alt_base = API_BASE_URL[: -len("/api")]
-                        alt_url = f"{alt_base}{ENDPOINT_SET_TARGET_TEMPERATURES}"
-                        _LOGGER.debug("Received 404 from %s, trying alt URL %s", url, alt_url)
-                        async with session.post(alt_url, json=payload, headers=headers) as alt_response:
-                            if alt_response.status == 200:
-                                _LOGGER.info("Successfully set target temperatures (alt)")
-                                return True
-                            alt_text = await alt_response.text()
-                            raise CosaAPIError(f"Set temperatures failed: {alt_response.status}: {alt_text}")
                     raise CosaAPIError(f"Set temperatures failed: {response.status}")
 
         except aiohttp.ClientError as err:
@@ -514,22 +419,6 @@ class CosaAPIClient:
                                 last_error = f"Status {status}: {text}"
                                 if status == 401:
                                     break
-                                if status == 404:
-                                    # try an alternative base if available
-                                    alt_base = API_BASE_URL
-                                    if API_BASE_URL.endswith("/api"):
-                                        alt_base = API_BASE_URL[: -len("/api")]
-                                    alt_url = f"{alt_base}{list_endpoint}"
-                                    _LOGGER.debug("Received 404 from %s, trying alt URL %s", url, alt_url)
-                                    async with session.get(alt_url, headers=headers) as alt_response:
-                                        status = alt_response.status
-                                        text = await alt_response.text()
-                                        if status != 200:
-                                            last_error = f"Status {status}: {text}"
-                                            if status == 401:
-                                                break
-                                            continue
-                                        data = await alt_response.json()
                                 continue
                             data = await response.json()
                     else:
@@ -540,21 +429,6 @@ class CosaAPIClient:
                                 last_error = f"Status {status}: {text}"
                                 if status == 401:
                                     break
-                                if status == 404:
-                                    alt_base = API_BASE_URL
-                                    if API_BASE_URL.endswith("/api"):
-                                        alt_base = API_BASE_URL[: -len("/api")]
-                                    alt_url = f"{alt_base}{list_endpoint}"
-                                    _LOGGER.debug("Received 404 from %s, trying alt URL %s", url, alt_url)
-                                    async with session.post(alt_url, json={}, headers=headers) as alt_response:
-                                        status = alt_response.status
-                                        text = await alt_response.text()
-                                        if status != 200:
-                                            last_error = f"Status {status}: {text}"
-                                            if status == 401:
-                                                break
-                                            continue
-                                        data = await alt_response.json()
                                 continue
                             data = await response.json()
 
@@ -607,29 +481,4 @@ class CosaAPIClient:
                 except Exception:
                     pass
             raise CosaAPIError(f"Failed to list endpoints: {last_error}")
-
-    async def get_user_info(self) -> Dict[str, Any]:
-        """Return user info for token validation using users/getInfo."""
-        session = await self._get_session()
-        url = f"{API_BASE_URL}{ENDPOINT_USER_INFO}"
-        headers = self._get_headers()
-        try:
-            async with session.post(url, json={}, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data
-                else:
-                    # Try fallback if 404 and API_BASE_URL endswith /api
-                    if response.status == 404 and API_BASE_URL.endswith("/api"):
-                        alt_base = API_BASE_URL[: -len("/api")]
-                        alt_url = f"{alt_base}{ENDPOINT_USER_INFO}"
-                        _LOGGER.debug("Received 404 from %s, trying alt URL %s", url, alt_url)
-                        async with session.post(alt_url, json={}, headers=headers) as alt_response:
-                            if alt_response.status == 200:
-                                return await alt_response.json()
-                            raise CosaAPIError(f"Get user info failed: {alt_response.status}")
-                    raise CosaAPIError(f"Get user info failed: {response.status}")
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Error fetching user info: %s", err)
-            raise CosaAPIError(f"Connection error: {err}") from err
 
