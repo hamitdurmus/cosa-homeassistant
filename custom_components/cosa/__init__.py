@@ -27,6 +27,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = CosaDataUpdateCoordinator(hass, entry)
     hass.data[DOMAIN][entry.entry_id]["coordinator"] = coordinator
     _LOGGER.debug("Coordinator created for entry %s", entry.entry_id)
+    # Ensure the coordinator performs the first data refresh before setting up platforms
+    try:
+        await coordinator.async_config_entry_first_refresh()
+        _LOGGER.debug("Coordinator initial refresh completed for entry %s", entry.entry_id)
+    except Exception as err:
+        _LOGGER.error("Initial coordinator refresh failed for entry %s: %s", entry.entry_id, err)
 
     # Forward the setup to all platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

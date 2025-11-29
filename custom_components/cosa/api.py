@@ -31,8 +31,8 @@ class CosaAPIClient:
 
     def __init__(
         self,
-        username: str | None = None,
-        password: str | None = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         endpoint_id: Optional[str] = None,
         token: Optional[str] = None,
         session: Optional[aiohttp.ClientSession] = None,

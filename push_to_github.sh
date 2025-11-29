@@ -18,18 +18,18 @@ gh repo create cosa-homeassistant --public --source=. --remote=origin --push
 
 if [ $? -eq 0 ]; then
     echo "✅ Başarıyla GitHub'a yüklendi!"
-    echo "🔗 Repository URL: https://github.com/hamitdurmus/cosa-homeassistant"
+    echo "🔗 Repository URL: https://github.com/ahamitd/cosa-homeassistant"
     echo ""
     echo "📝 HACS'a eklemek için:"
     echo "1. Home Assistant'ta HACS'ı açın"
     echo "2. Entegrasyonlar > Özel Depolar"
-    echo "3. URL: https://github.com/hamitdurmus/cosa-homeassistant"
+    echo "3. URL: https://github.com/ahamitd/cosa-homeassistant"
     echo "4. Kategori: Integration"
 else
     echo "❌ Hata oluştu. Lütfen manuel olarak deneyin."
     echo ""
     echo "Manuel komutlar:"
-    echo "  git remote add origin https://github.com/hamitdurmus/cosa-homeassistant.git"
+    echo "  git remote add origin https://github.com/ahamitd/cosa-homeassistant.git"
     echo "  git push -u origin main"
 fi
 

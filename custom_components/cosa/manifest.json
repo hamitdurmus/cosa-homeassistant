@@ -2,11 +2,11 @@
   "domain": "cosa",
   "name": "COSA Termostat",
   "version": "1.0.6",
-  "documentation": "https://github.com/hamitdurmus/cosa-homeassistant",
-  "issue_tracker": "https://github.com/hamitdurmus/cosa-homeassistant/issues",
+  "documentation": "https://github.com/ahamitd/cosa-homeassistant",
+  "issue_tracker": "https://github.com/ahamitd/cosa-homeassistant/issues",
   "dependencies": [],
   "codeowners": [
-    "@hamitdurmus"
+    "@ahamitd"
   ],
   "requirements": [
     "aiohttp>=3.8.0"
