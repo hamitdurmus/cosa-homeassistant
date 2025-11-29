@@ -13,7 +13,7 @@ ENDPOINT_LOGIN = "/users/login"
 ENDPOINT_GET_ENDPOINT = "/endpoints/getEndpoint"
 ENDPOINT_SET_MODE = "/endpoints/setMode"
 ENDPOINT_SET_TARGET_TEMPERATURES = "/endpoints/setTargetTemperatures"
-ENDPOINT_LIST_ENDPOINTS = "/endpoints/list"
+ENDPOINT_LIST_ENDPOINTS = "/endpoints/getEndpoints"
 ENDPOINT_USER_INFO = "/users/getInfo"
 
 # Headers
