@@ -11,6 +11,7 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
 from .api import CosaAPIClient, CosaAPIError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required("username", description="Email veya kullanıcı adı"): str,
         vol.Required("password"): str,
         vol.Optional("endpoint_id", description="Endpoint ID (opsiyonel - otomatik tespit edilebilir)"): str,
+        vol.Optional("token", description="Auth token (opsiyonel - kullanıcının proxy veya dış token'ı varsa)"): str,
     }
 )
 
@@ -27,20 +29,33 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 async def validate_input(hass: HomeAssistant, data: Dict[str, Any]) -> Dict[str, Any]:
     """Validate the user input allows us to connect."""
     client = CosaAPIClient(
-        username=data["username"],
-        password=data["password"],
+        username=data.get("username"),
+        password=data.get("password"),
         endpoint_id=data.get("endpoint_id"),
+        token=data.get("token"),
+        session=async_get_clientsession(hass),
     )
 
     try:
-        # Try to login
-        if not await client.login():
-            raise InvalidAuth
+        # If token is not provided, try to login
+        if not data.get("token"):
+            if not await client.login():
+                raise InvalidAuth
 
-        # Get endpoint status to verify connection
+        # Get endpoint status and name to verify connection and store the device name
+        device_name = None
+        endpoint_data = {}
         if client._endpoint_id:
             status = await client.get_endpoint_status()
-            endpoint_data = status.get("endpoint", {})
+            if isinstance(status, dict) and "endpoint" in status:
+                endpoint_data = status.get("endpoint") or {}
+            elif isinstance(status, dict) and "data" in status and isinstance(status["data"], dict):
+                endpoint_data = status["data"].get("endpoint") or status["data"]
+            elif isinstance(status, dict) and "temperature" in status:
+                endpoint_data = status
+            elif isinstance(status, list) and len(status) > 0:
+                endpoint_data = status[0]
+            device_name = endpoint_data.get("name") if endpoint_data else None
         else:
             # If no endpoint_id provided, try to get endpoints list
             try:
@@ -51,7 +66,15 @@ async def validate_input(hass: HomeAssistant, data: Dict[str, Any]) -> Dict[str,
                     client._endpoint_id = first_endpoint.get("id") or first_endpoint.get("_id") or first_endpoint.get("endpoint")
                     if client._endpoint_id:
                         status = await client.get_endpoint_status(client._endpoint_id)
-                        endpoint_data = status.get("endpoint", {})
+                        if isinstance(status, dict) and "endpoint" in status:
+                            endpoint_data = status.get("endpoint") or {}
+                        elif isinstance(status, dict) and "data" in status and isinstance(status["data"], dict):
+                            endpoint_data = status["data"].get("endpoint") or status["data"]
+                        elif isinstance(status, dict) and "temperature" in status:
+                            endpoint_data = status
+                        elif isinstance(status, list) and len(status) > 0:
+                            endpoint_data = status[0]
+                        device_name = endpoint_data.get("name") if endpoint_data else None
                     else:
                         endpoint_data = {}
                 else:
@@ -60,15 +83,24 @@ async def validate_input(hass: HomeAssistant, data: Dict[str, Any]) -> Dict[str,
                 # If list_endpoints fails, just verify login works
                 endpoint_data = {}
 
+        _LOGGER.debug("validate_input: login successful, endpoint_id=%s", client._endpoint_id)
         await client.close()
 
         # Return info that will be stored in the config entry
-        return {
+        # Include device_name if we detected one for nicer device naming later
+        entry_data = {
             "title": f"COSA Termostat ({data['username']})",
             "endpoint_id": client._endpoint_id or data.get("endpoint_id", ""),
         }
+        if device_name:
+            entry_data["device_name"] = device_name
+        return entry_data
     except CosaAPIError as err:
         _LOGGER.error("API error during validation: %s", err)
+        # Map authentication errors to InvalidAuth so the UI shows proper error
+        msg = str(err).lower()
+        if "invalid" in msg and ("auth" in msg or "username" in msg or "credentials" in msg):
+            raise InvalidAuth from err
         raise CannotConnect from err
     except Exception as err:
         _LOGGER.error("Unexpected error during validation: %s", err)

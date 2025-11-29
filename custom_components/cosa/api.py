@@ -28,18 +28,30 @@ class CosaAPIError(Exception):
 class CosaAPIClient:
     """Client for COSA API."""
 
-    def __init__(self, username: str, password: str, endpoint_id: Optional[str] = None):
+    def __init__(
+        self,
+        username: str | None = None,
+        password: str | None = None,
+        endpoint_id: Optional[str] = None,
+        token: Optional[str] = None,
+        session: Optional[aiohttp.ClientSession] = None,
+    ):
         """Initialize the API client."""
         self._username = username
         self._password = password
         self._endpoint_id = endpoint_id
         self._token: Optional[str] = None
-        self._session: Optional[aiohttp.ClientSession] = None
+        # Allow passing a pre-existing token (e.g. from a proxy or manual config)
+        if token:
+            self._token = token
+        # allow passing an existing aiohttp session (recommended: async_get_clientsession(hass))
+        self._session: Optional[aiohttp.ClientSession] = session
         self._retry_count = 3  # Retry count for failed requests
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
-        if self._session is None or self._session.closed:
+        if self._session is None or (hasattr(self._session, "closed") and self._session.closed):
+            # If no session provided, create a new ClientSession with timeout
             self._session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT)
             )
@@ -77,32 +89,31 @@ class CosaAPIClient:
                         "Content-Type": CONTENT_TYPE,
                     }
 
+                    _LOGGER.debug("Attempting login to %s with payload keys: %s", url, list(payload.keys()))
                     async with session.post(url, json=payload, headers=headers) as response:
+                        _LOGGER.debug("Login response status %s from %s", response.status, url)
                         if response.status == 200:
                             data = await response.json()
                             
                             # Try to extract token from various response formats
-                            # Note: API uses authToken (camelCase) as primary format
-                            token = None
-                            if "authToken" in data:
-                                token = data["authToken"]
-                            elif "token" in data:
-                                token = data["token"]
-                            elif "authtoken" in data:
-                                token = data["authtoken"]
-                            elif "data" in data:
-                                if isinstance(data["data"], dict):
-                                    token = (
-                                        data["data"].get("authToken") or
-                                        data["data"].get("token") or
-                                        data["data"].get("authtoken")
-                                    )
-                                elif isinstance(data["data"], str):
-                                    token = data["data"]
-                            elif "access_token" in data:
-                                token = data["access_token"]
-                            elif "accessToken" in data:
-                                token = data["accessToken"]
+                            def find_token(obj):
+                                # Recursively search for token strings in nested structures
+                                if isinstance(obj, dict):
+                                    for k, v in obj.items():
+                                        if k and isinstance(k, str) and k.lower() in ("authtoken", "authtoken", "authtoken", "token", "accesstoken", "access_token", "auth_token"):
+                                            return v
+                                        if isinstance(v, (dict, list)):
+                                            res = find_token(v)
+                                            if res:
+                                                return res
+                                elif isinstance(obj, list):
+                                    for i in obj:
+                                        res = find_token(i)
+                                        if res:
+                                            return res
+                                return None
+
+                            token = find_token(data)
 
                             # Log response for debugging if token not found
                             if not token:
@@ -114,24 +125,38 @@ class CosaAPIClient:
                                 
                                 # Try to extract endpoint ID from response
                                 if not self._endpoint_id:
-                                    if "endpoint" in data:
-                                        endpoint_data = data["endpoint"]
-                                        if isinstance(endpoint_data, list) and len(endpoint_data) > 0:
-                                            self._endpoint_id = endpoint_data[0].get("id") or endpoint_data[0].get("_id")
-                                        elif isinstance(endpoint_data, dict):
-                                            self._endpoint_id = endpoint_data.get("id") or endpoint_data.get("_id")
-                                    elif "endpoints" in data:
-                                        endpoints = data["endpoints"]
-                                        if isinstance(endpoints, list) and len(endpoints) > 0:
-                                            self._endpoint_id = endpoints[0].get("id") or endpoints[0].get("_id")
-                                    elif "user" in data:
-                                        user_data = data["user"]
-                                        if "endpoint" in user_data:
-                                            endpoint_data = user_data["endpoint"]
-                                            if isinstance(endpoint_data, list) and len(endpoint_data) > 0:
-                                                self._endpoint_id = endpoint_data[0].get("id") or endpoint_data[0].get("_id")
-                                            elif isinstance(endpoint_data, dict):
-                                                self._endpoint_id = endpoint_data.get("id") or endpoint_data.get("_id")
+                                    def find_endpoint_id(obj):
+                                        if isinstance(obj, dict):
+                                            # endpoint or endpoints keys
+                                            if "endpoint" in obj:
+                                                endpoint_data = obj.get("endpoint")
+                                                if isinstance(endpoint_data, list) and len(endpoint_data) > 0:
+                                                    return endpoint_data[0].get("id") or endpoint_data[0].get("_id") or endpoint_data[0].get("endpoint")
+                                                elif isinstance(endpoint_data, dict):
+                                                    return endpoint_data.get("id") or endpoint_data.get("_id") or endpoint_data.get("endpoint")
+                                            if "endpoints" in obj:
+                                                endpoints = obj.get("endpoints")
+                                                if isinstance(endpoints, list) and len(endpoints) > 0:
+                                                    return endpoints[0].get("id") or endpoints[0].get("_id") or endpoints[0].get("endpoint")
+                                            # nested data
+                                            if "data" in obj and isinstance(obj["data"], (dict, list)):
+                                                return find_endpoint_id(obj["data"])
+                                            # try nested keys
+                                            for v in obj.values():
+                                                if isinstance(v, (dict, list)):
+                                                    res = find_endpoint_id(v)
+                                                    if res:
+                                                        return res
+                                        elif isinstance(obj, list):
+                                            for item in obj:
+                                                res = find_endpoint_id(item)
+                                                if res:
+                                                    return res
+                                        return None
+
+                                    found_id = find_endpoint_id(data)
+                                    if found_id:
+                                        self._endpoint_id = found_id
 
                                 _LOGGER.info("Successfully logged in to COSA API")
                                 return True
@@ -145,6 +170,7 @@ class CosaAPIClient:
                             raise CosaAPIError("Invalid username or password")
                         else:
                             error_text = await response.text()
+                            _LOGGER.debug("Login response status %s from %s", response.status, url)
                             _LOGGER.debug(
                                 "Login attempt failed with status %s: %s", response.status, error_text
                             )
@@ -172,11 +198,14 @@ class CosaAPIClient:
             raise CosaAPIError("Not authenticated. Please login first.")
 
         # API expects authtoken (lowercase) in headers based on working config
-        return {
+        # Some servers use authToken camelCase, some use authtoken lowercase; include both to be tolerant
+        headers = {
+            "authToken": self._token,
             "authtoken": self._token,
             "User-Agent": USER_AGENT,
             "Content-Type": CONTENT_TYPE,
         }
+        return headers
 
     async def get_endpoint_status(self, endpoint_id: Optional[str] = None) -> Dict[str, Any]:
         """Get endpoint status."""
@@ -195,6 +224,11 @@ class CosaAPIClient:
                 async with session.post(url, json=payload, headers=headers) as response:
                     if response.status == 200:
                         data = await response.json()
+                        # Normalize nested data
+                        if isinstance(data, dict) and "data" in data and isinstance(data["data"], dict):
+                            nested = data.get("data")
+                            if "endpoint" in nested or "endpoints" in nested or "temperature" in nested:
+                                return nested
                         return data
                     elif response.status == 401:
                         # Token expired, try to re-login
@@ -308,78 +342,95 @@ class CosaAPIClient:
             raise CosaAPIError(f"Connection error: {err}") from err
 
     async def list_endpoints(self) -> list[Dict[str, Any]]:
-        """List all endpoints for the user."""
+        """List all endpoints for the user.
+
+        This function tries multiple API endpoints and both GET/POST to maximize
+        compatibility with different API versions.
+        """
         if not self._token:
             await self.login()
 
-        try:
-            session = await self._get_session()
-            url = f"{API_BASE_URL}{ENDPOINT_LIST_ENDPOINTS}"
-            headers = self._get_headers()
-            last_status = None
+        session = await self._get_session()
+        possible_list_endpoints = [ENDPOINT_LIST_ENDPOINTS, "/endpoints/getEndpoints", "/endpoints/getEndpoints/"]
+        headers = self._get_headers()
 
-            # Try GET first (as in other repository), then POST if needed
-            for method in ["get", "post"]:
+        last_error = None
+        for list_endpoint in possible_list_endpoints:
+            url = f"{API_BASE_URL}{list_endpoint}"
+
+            # Try GET then POST
+            for method in ("get", "post"):
                 try:
+                    _LOGGER.debug("Listing endpoints using %s %s", method.upper(), url)
                     if method == "get":
                         async with session.get(url, headers=headers) as response:
-                            last_status = response.status
-                            if last_status == 200:
-                                data = await response.json()
-                            elif last_status == 401:
-                                # Token expired, break to handle below
-                                break
-                            else:
-                                # Try POST method for other status codes
+                            status = response.status
+                            text = await response.text()
+                            if status != 200:
+                                # If 401 attempt login and retry once later
+                                last_error = f"Status {status}: {text}"
+                                if status == 401:
+                                    break
                                 continue
+                            data = await response.json()
                     else:
                         async with session.post(url, json={}, headers=headers) as response:
-                            last_status = response.status
-                            if last_status == 200:
-                                data = await response.json()
-                            else:
-                                error_text = await response.text()
-                                raise CosaAPIError(f"List endpoints failed: {last_status} - {error_text}")
-                    
-                    # Try different response formats
+                            status = response.status
+                            text = await response.text()
+                            if status != 200:
+                                last_error = f"Status {status}: {text}"
+                                if status == 401:
+                                    break
+                                continue
+                            data = await response.json()
+
+                    # Normalize response
                     if isinstance(data, list):
                         return data
-                    elif "endpoints" in data:
-                        endpoints = data["endpoints"]
-                        return endpoints if isinstance(endpoints, list) else [endpoints]
-                    elif "endpoint" in data:
-                        endpoint = data["endpoint"]
-                        return endpoint if isinstance(endpoint, list) else [endpoint]
-                    elif "data" in data:
-                        data_list = data["data"]
-                        return data_list if isinstance(data_list, list) else [data_list]
-                    return []
-                    
+                    if isinstance(data, dict) and "data" in data and isinstance(data["data"], (list, dict)):
+                        nested = data["data"]
+                        if isinstance(nested, list):
+                            return nested
+                        if isinstance(nested, dict):
+                            if "endpoints" in nested:
+                                endpoints = nested["endpoints"]
+                                return endpoints if isinstance(endpoints, list) else [endpoints]
+                            if "endpoint" in nested:
+                                endpoint = nested["endpoint"]
+                                return endpoint if isinstance(endpoint, list) else [endpoint]
+                            return [nested]
+                    if isinstance(data, dict):
+                        if "endpoints" in data:
+                            endpoints = data["endpoints"]
+                            return endpoints if isinstance(endpoints, list) else [endpoints]
+                        if "endpoint" in data:
+                            endpoint = data["endpoint"]
+                            return endpoint if isinstance(endpoint, list) else [endpoint]
+                    # Unrecognized structure, continue to next method/endpoint
+                    continue
                 except CosaAPIError:
                     raise
-                except Exception as e:
-                    if method == "get":
-                        _LOGGER.debug("GET method failed, trying POST: %s", e)
-                        continue
-                    raise
-            
-            # Handle 401 - token expired
-            if last_status == 401:
-                _LOGGER.warning("Token expired, attempting to re-login")
-                await self.login()
-                # Retry once with POST
-                async with session.post(url, json={}, headers=self._get_headers()) as retry_response:
-                    if retry_response.status == 200:
-                        data = await retry_response.json()
-                        if isinstance(data, list):
-                            return data
-                        elif "endpoints" in data:
-                            return data["endpoints"] if isinstance(data["endpoints"], list) else [data["endpoints"]]
-                raise CosaAPIError("Failed to list endpoints after re-login")
-            elif last_status:
-                raise CosaAPIError(f"List endpoints failed with status {last_status}")
+                except aiohttp.ClientError as err:
+                    _LOGGER.debug("Connection error on list_endpoints: %s", err)
+                    last_error = str(err)
+                    continue
 
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Error listing endpoints: %s", err)
-            raise CosaAPIError(f"Connection error: {err}") from err
+        # If we get here, all attempts failed
+        if last_error:
+            # Authentication issue? try to re-login if possible
+            if "401" in last_error or "invalid" in last_error.lower():
+                _LOGGER.warning("Token expired or invalid while listing endpoints, attempting re-login")
+                await self.login()
+                # Try again with primary endpoint using POST
+                try:
+                    async with session.post(f"{API_BASE_URL}{ENDPOINT_GET_ENDPOINT}", json={}, headers=self._get_headers()) as retry_resp:
+                        if retry_resp.status == 200:
+                            data = await retry_resp.json()
+                            if isinstance(data, list):
+                                return data
+                            if isinstance(data, dict) and "endpoints" in data:
+                                return data["endpoints"] if isinstance(data["endpoints"], list) else [data["endpoints"]]
+                except Exception:
+                    pass
+            raise CosaAPIError(f"Failed to list endpoints: {last_error}")
 

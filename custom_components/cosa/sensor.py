@@ -98,7 +98,7 @@ class CosaSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_{description.key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, config_entry.entry_id)},
-            name=f"COSA Termostat ({config_entry.data.get('username', 'Unknown')})",
+            name=f"{config_entry.data.get('device_name') or ('COSA Termostat (' + config_entry.data.get('username', 'Unknown') + ')')}",
             manufacturer="COSA",
             model="Smart Thermostat",
         )
@@ -117,6 +117,14 @@ class CosaSensor(CoordinatorEntity, SensorEntity):
 
         elif self.entity_description.key == "operation_mode":
             option = data.get("option")
+            operation_mode = data.get("operation_mode")
+            if operation_mode:
+                # Map operation mode directly (heating -> Isıtma, cooling -> Soğutma)
+                if operation_mode.lower() == "heating":
+                    return "Isıtma"
+                if operation_mode.lower() == "cooling":
+                    return "Soğutma"
+            # Fall back to option label translations
             if option == MODE_HOME:
                 return "Ev"
             elif option == MODE_AWAY:

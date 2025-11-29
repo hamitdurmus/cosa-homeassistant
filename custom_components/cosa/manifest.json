@@ -5,10 +5,13 @@
   "documentation": "https://github.com/hamitdurmus/cosa-homeassistant",
   "issue_tracker": "https://github.com/hamitdurmus/cosa-homeassistant/issues",
   "dependencies": [],
-  "codeowners": ["@hamitdurmus"],
-  "requirements": ["aiohttp>=3.8.0"],
+  "codeowners": [
+    "@hamitdurmus"
+  ],
+  "requirements": [
+    "aiohttp>=3.8.0"
+  ],
   "config_flow": true,
   "iot_class": "cloud_polling",
   "integration_type": "hub"
 }
-

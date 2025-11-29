@@ -92,13 +92,19 @@ class CosaDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch data from COSA API."""
         if self.client is None:
+            # Use HA shared aiohttp session
+            from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
             self.client = CosaAPIClient(
-                username=self.config_entry.data["username"],
-                password=self.config_entry.data["password"],
+                username=self.config_entry.data.get("username"),
+                password=self.config_entry.data.get("password"),
                 endpoint_id=self.config_entry.data.get("endpoint_id"),
+                token=self.config_entry.data.get("token"),
+                session=async_get_clientsession(self.hass),
             )
             self.endpoint_id = self.config_entry.data.get("endpoint_id")
-            await self.client.login()
+            if not self.client._token:
+                await self.client.login()
 
         # If endpoint_id is not set, try to get it from API
         if not self.endpoint_id:
@@ -124,14 +130,26 @@ class CosaDataUpdateCoordinator(DataUpdateCoordinator):
 
         try:
             status = await self.client.get_endpoint_status(self.endpoint_id)
-            
-            # Handle different response formats
+
+            # Handle different response formats including nested 'data' wrappers
             endpoint_data = {}
             if isinstance(status, dict):
-                endpoint_data = status.get("endpoint", {})
-                # If endpoint is not in response, maybe the response itself is the endpoint data
-                if not endpoint_data and "temperature" in status:
+                # If status contains direct endpoint
+                if "endpoint" in status:
+                    endpoint_data = status.get("endpoint") or {}
+                # If the wrapper 'data' contains endpoint
+                elif "data" in status and isinstance(status["data"], dict):
+                    data_inner = status["data"]
+                    if "endpoint" in data_inner:
+                        endpoint_data = data_inner.get("endpoint") or {}
+                    else:
+                        endpoint_data = data_inner if "temperature" in data_inner else {}
+                # If the status itself looks like endpoint data
+                elif "temperature" in status or "humidity" in status:
                     endpoint_data = status
+                # If endpoints list present, get first
+                elif "endpoints" in status and isinstance(status["endpoints"], list) and status["endpoints"]:
+                    endpoint_data = status["endpoints"][0]
             elif isinstance(status, list) and len(status) > 0:
                 endpoint_data = status[0]
             
@@ -155,18 +173,36 @@ class CosaDataUpdateCoordinator(DataUpdateCoordinator):
                     },
                 }
 
+            # If there's a list or nested structure, normalize and handle missing targetTemperature
+            raw_target_temps = endpoint_data.get("targetTemperatures") or {}
+            raw_target_temp = endpoint_data.get("targetTemperature")
+            # Determine single current target temperature based on option if targetTemperatures exists
+            option = endpoint_data.get("option")
+            selected_target = None
+            if raw_target_temp is not None:
+                selected_target = raw_target_temp
+            elif raw_target_temps:
+                if option and option in raw_target_temps:
+                    selected_target = raw_target_temps.get(option)
+                else:
+                    # fallback to home or first available
+                    selected_target = raw_target_temps.get("home") or next(iter(raw_target_temps.values()), None)
+
             return {
                 "temperature": endpoint_data.get("temperature"),
-                "target_temperature": endpoint_data.get("targetTemperature"),
+                "target_temperature": selected_target,
                 "humidity": endpoint_data.get("humidity"),
                 "combi_state": endpoint_data.get("combiState"),
-                "option": endpoint_data.get("option"),
+                "option": option,
                 "mode": endpoint_data.get("mode"),
                 "target_temperatures": {
-                    "home": endpoint_data.get("targetTemperatures", {}).get("home"),
-                    "away": endpoint_data.get("targetTemperatures", {}).get("away"),
-                    "sleep": endpoint_data.get("targetTemperatures", {}).get("sleep"),
-                    "custom": endpoint_data.get("targetTemperatures", {}).get("custom"),
+                    "home": raw_target_temps.get("home"),
+                    "away": raw_target_temps.get("away"),
+                    "sleep": raw_target_temps.get("sleep"),
+                    "custom": raw_target_temps.get("custom"),
+                },
+                "name": endpoint_data.get("name"),
+                "operation_mode": endpoint_data.get("operationMode"),
                 },
             }
         except CosaAPIError as err:
@@ -232,7 +268,7 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
         # Set device info for proper device registry
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, config_entry.entry_id)},
-            name=f"COSA Termostat ({config_entry.data.get('username', 'Unknown')})",
+            name=f"{config_entry.data.get('device_name') or ('COSA Termostat (' + config_entry.data.get('username', 'Unknown') + ')')}",
             manufacturer="COSA",
             model="Smart Thermostat",
         )
