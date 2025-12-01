@@ -1,23 +1,4 @@
-"""COSA Smart Thermostat Climate Platform.
-
-Bu modül Home Assistant climate entity'sini oluşturur.
-DataUpdateCoordinator kullanarak her 10 saniyede API'den veri çeker.
-
-HVAC Modları:
-- off: Kapalı (mode=manual, option=frozen)
-- heat: Isıtma açık (mode=manual/auto/schedule)
-
-Preset Modları:
-- home: Ev modu (mode=manual, option=home)
-- sleep: Uyku modu (mode=manual, option=sleep)
-- away: Dışarı modu (mode=manual, option=away)
-- custom: Kullanıcı modu (mode=manual, option=custom)
-- auto: Otomatik mod (mode=auto)
-- schedule: Haftalık program (mode=schedule)
-
-Sıcaklık Ayarı:
-- setTargetTemperatures API'si ile tüm preset sıcaklıkları güncellenir
-"""
+"""COSA Climate Platform."""
 
 from __future__ import annotations
 
@@ -42,32 +23,12 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 
-from .api import (
-    CosaAPI,
-    CosaAPIError,
-    CosaAuthError,
-    extract_endpoint_state,
-)
+from .api import CosaAPI, CosaAPIError, CosaAuthError
 from .const import (
-    DOMAIN,
-    SCAN_INTERVAL,
-    MIN_TEMP,
-    MAX_TEMP,
-    TEMP_STEP,
-    MODE_MANUAL,
-    MODE_AUTO,
-    MODE_SCHEDULE,
-    OPTION_HOME,
-    OPTION_SLEEP,
-    OPTION_AWAY,
-    OPTION_CUSTOM,
-    OPTION_FROZEN,
-    PRESET_HOME,
-    PRESET_SLEEP,
-    PRESET_AWAY,
-    PRESET_CUSTOM,
-    PRESET_AUTO,
-    PRESET_SCHEDULE,
+    DOMAIN, SCAN_INTERVAL, MIN_TEMP, MAX_TEMP, TEMP_STEP,
+    MODE_MANUAL, MODE_AUTO, MODE_SCHEDULE,
+    OPTION_HOME, OPTION_SLEEP, OPTION_AWAY, OPTION_CUSTOM, OPTION_FROZEN,
+    PRESET_HOME, PRESET_SLEEP, PRESET_AWAY, PRESET_CUSTOM, PRESET_AUTO, PRESET_SCHEDULE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -78,47 +39,22 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Climate platformunu kur.
-    
-    DataUpdateCoordinator oluşturur ve climate entity'yi ekler.
-    """
+    """Climate platformunu kur."""
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     
-    # Coordinator oluştur
     coordinator = CosaCoordinator(hass, config_entry, entry_data)
-    
-    # İlk veri çekimini yap
     await coordinator.async_config_entry_first_refresh()
     
-    # Coordinator'ı sakla (sensor platformu da kullanacak)
     hass.data[DOMAIN][config_entry.entry_id]["coordinator"] = coordinator
     
-    # Climate entity oluştur
     async_add_entities([CosaClimate(coordinator, config_entry)])
-    
-    _LOGGER.info("COSA climate entity oluşturuldu")
 
 
 class CosaCoordinator(DataUpdateCoordinator):
-    """COSA veri güncelleme koordinatörü.
-    
-    Her SCAN_INTERVAL'da (10 saniye) API'den veri çeker.
-    Token süresi dolarsa otomatik yeniler.
-    """
+    """COSA Koordinatör."""
 
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        config_entry: ConfigEntry,
-        entry_data: dict[str, Any],
-    ) -> None:
-        """Koordinatörü başlat."""
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=SCAN_INTERVAL,
-        )
+    def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry, entry_data: dict) -> None:
+        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=SCAN_INTERVAL)
         
         self.config_entry = config_entry
         self._email = entry_data["email"]
@@ -126,315 +62,168 @@ class CosaCoordinator(DataUpdateCoordinator):
         self._token = entry_data["token"]
         self._endpoint_id = entry_data["endpoint_id"]
         self._device_name = entry_data.get("device_name", "COSA Termostat")
+        self._place_id = entry_data.get("place_id")
         
-        # API istemcisi
         self._api = CosaAPI(async_get_clientsession(hass))
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """API'den güncel verileri çek.
-        
-        Her 10 saniyede çağrılır.
-        getEndpoints API'sinden sıcaklık, nem, mod, option, targetTemperatures alınır.
-        
-        Returns:
-            Normalize edilmiş endpoint durumu
-            
-        Raises:
-            UpdateFailed: API hatası durumunda
-        """
         try:
-            # Endpoint'leri al
-            endpoints = await self._api.get_endpoints(self._token)
+            detail = await self._api.get_endpoint_detail(self._token, self._endpoint_id)
             
-            if not endpoints:
-                raise UpdateFailed("Endpoint bulunamadı")
+            # Hava durumu
+            forecast = {}
+            if self._place_id:
+                forecast = await self._api.get_forecast(self._token, self._place_id)
             
-            # Bizim endpoint'i bul
-            endpoint = None
-            for ep in endpoints:
-                ep_id = ep.get("id") or ep.get("_id")
-                if ep_id == self._endpoint_id:
-                    endpoint = ep
-                    break
-            
-            if not endpoint:
-                # İlk endpoint'i kullan
-                endpoint = endpoints[0]
-            
-            # Durumu çıkar ve döndür
-            state = extract_endpoint_state(endpoint)
-            _LOGGER.debug("Veri güncellendi: %s", state)
-            return state
+            return {
+                "endpoint": detail,
+                "forecast": forecast,
+            }
             
         except CosaAuthError:
-            # Token süresi dolmuş, yenile
-            _LOGGER.warning("Token süresi doldu, yenileniyor...")
-            try:
-                self._token = await self._api.login(self._email, self._password)
-                
-                # Tekrar dene
-                endpoints = await self._api.get_endpoints(self._token)
-                
-                if endpoints:
-                    endpoint = endpoints[0]
-                    for ep in endpoints:
-                        ep_id = ep.get("id") or ep.get("_id")
-                        if ep_id == self._endpoint_id:
-                            endpoint = ep
-                            break
-                    return extract_endpoint_state(endpoint)
-                    
-            except Exception as err:
-                raise UpdateFailed(f"Token yenileme hatası: {err}") from err
-                
+            self._token = await self._api.login(self._email, self._password)
+            detail = await self._api.get_endpoint_detail(self._token, self._endpoint_id)
+            return {"endpoint": detail, "forecast": {}}
+            
         except CosaAPIError as err:
             raise UpdateFailed(f"API hatası: {err}") from err
-            
-        except Exception as err:
-            raise UpdateFailed(f"Beklenmeyen hata: {err}") from err
 
     async def async_set_mode(self, mode: str, option: str | None = None) -> None:
-        """Mod değiştir.
-        
-        Args:
-            mode: "manual", "auto", veya "schedule"
-            option: Manual için: "home", "sleep", "away", "custom", "frozen"
-        """
         try:
             await self._api.set_mode(self._token, self._endpoint_id, mode, option)
             await self.async_request_refresh()
         except CosaAuthError:
-            # Token yenile ve tekrar dene
             self._token = await self._api.login(self._email, self._password)
             await self._api.set_mode(self._token, self._endpoint_id, mode, option)
             await self.async_request_refresh()
 
-    async def async_set_temperatures(
-        self,
-        home: float,
-        away: float,
-        sleep: float,
-        custom: float,
-    ) -> None:
-        """Hedef sıcaklıkları ayarla.
-        
-        Args:
-            home: Ev modu sıcaklığı
-            away: Dışarı modu sıcaklığı
-            sleep: Uyku modu sıcaklığı
-            custom: Kullanıcı modu sıcaklığı
-        """
+    async def async_set_temperatures(self, home: float, away: float, sleep: float, custom: float) -> None:
         try:
-            await self._api.set_target_temperatures(
-                self._token,
-                self._endpoint_id,
-                home,
-                away,
-                sleep,
-                custom,
-            )
+            await self._api.set_target_temperatures(self._token, self._endpoint_id, home, away, sleep, custom)
             await self.async_request_refresh()
         except CosaAuthError:
-            # Token yenile ve tekrar dene
             self._token = await self._api.login(self._email, self._password)
-            await self._api.set_target_temperatures(
-                self._token,
-                self._endpoint_id,
-                home,
-                away,
-                sleep,
-                custom,
-            )
+            await self._api.set_target_temperatures(self._token, self._endpoint_id, home, away, sleep, custom)
             await self.async_request_refresh()
 
 
 class CosaClimate(CoordinatorEntity[CosaCoordinator], ClimateEntity):
-    """COSA Termostat Climate Entity.
-    
-    Home Assistant'ın climate kartında görünen ana entity.
-    HVAC modu, preset modu ve sıcaklık kontrolü sağlar.
-    """
+    """COSA Climate Entity."""
 
-    # Entity özellikleri
     _attr_has_entity_name = True
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_target_temperature_step = TEMP_STEP
     _attr_min_temp = MIN_TEMP
     _attr_max_temp = MAX_TEMP
-    
-    # Desteklenen HVAC modları
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT]
-    
-    # Desteklenen özellikler
     _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE
-        | ClimateEntityFeature.PRESET_MODE
+        ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
     )
-    
-    # Preset modları
-    _attr_preset_modes = [
-        PRESET_HOME,
-        PRESET_SLEEP,
-        PRESET_AWAY,
-        PRESET_CUSTOM,
-        PRESET_AUTO,
-        PRESET_SCHEDULE,
-    ]
+    _attr_preset_modes = [PRESET_HOME, PRESET_SLEEP, PRESET_AWAY, PRESET_CUSTOM, PRESET_AUTO, PRESET_SCHEDULE]
 
-    def __init__(
-        self,
-        coordinator: CosaCoordinator,
-        config_entry: ConfigEntry,
-    ) -> None:
-        """Climate entity'yi başlat."""
+    def __init__(self, coordinator: CosaCoordinator, config_entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         
         self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_climate"
         self._attr_name = "Termostat"
+        self._last_preset = PRESET_HOME
         
-        # Cihaz bilgisi
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, config_entry.entry_id)},
             name=coordinator._device_name,
             manufacturer="COSA",
             model="Smart Thermostat",
         )
-        
-        # Son bilinen preset (OFF'dan dönüş için)
-        self._last_preset = PRESET_HOME
+
+    @property
+    def _endpoint(self) -> dict:
+        if self.coordinator.data:
+            return self.coordinator.data.get("endpoint", {})
+        return {}
 
     @property
     def current_temperature(self) -> float | None:
-        """Mevcut oda sıcaklığı."""
-        if self.coordinator.data:
-            return self.coordinator.data.get("temperature")
-        return None
+        return self._endpoint.get("temperature")
 
     @property
     def target_temperature(self) -> float | None:
-        """Hedef sıcaklık."""
-        if self.coordinator.data:
-            return self.coordinator.data.get("target_temperature")
-        return None
+        return self._endpoint.get("targetTemperature")
 
     @property
     def current_humidity(self) -> int | None:
-        """Mevcut nem oranı."""
-        if self.coordinator.data:
-            humidity = self.coordinator.data.get("humidity")
-            if humidity is not None:
-                return int(humidity)
-        return None
+        humidity = self._endpoint.get("humidity")
+        return int(humidity) if humidity else None
 
     @property
     def hvac_mode(self) -> HVACMode:
-        """Mevcut HVAC modu.
-        
-        - OFF: mode=manual, option=frozen
-        - HEAT: Diğer tüm durumlar
-        """
-        if not self.coordinator.data:
-            return HVACMode.OFF
-        
-        mode = self.coordinator.data.get("mode")
-        option = self.coordinator.data.get("option")
-        
-        # Manual + frozen = OFF
+        mode = self._endpoint.get("mode")
+        option = self._endpoint.get("option")
         if mode == MODE_MANUAL and option == OPTION_FROZEN:
             return HVACMode.OFF
-        
         return HVACMode.HEAT
 
     @property
     def hvac_action(self) -> HVACAction:
-        """Mevcut HVAC eylemi.
-        
-        - OFF: Kapalı
-        - HEATING: Kombi çalışıyor
-        - IDLE: Beklemede
-        """
         if self.hvac_mode == HVACMode.OFF:
             return HVACAction.OFF
-        
-        if self.coordinator.data:
-            combi_state = self.coordinator.data.get("combi_state")
-            if combi_state == "on":
-                return HVACAction.HEATING
-        
+        if self._endpoint.get("combiState") == "on":
+            return HVACAction.HEATING
         return HVACAction.IDLE
 
     @property
     def preset_mode(self) -> str | None:
-        """Mevcut preset modu.
+        mode = self._endpoint.get("mode")
+        option = self._endpoint.get("option")
         
-        API'den gelen mode ve option'a göre belirlenir.
-        """
-        if not self.coordinator.data:
-            return None
-        
-        mode = self.coordinator.data.get("mode")
-        option = self.coordinator.data.get("option")
-        
-        # Auto mod
         if mode == MODE_AUTO:
             return PRESET_AUTO
-        
-        # Schedule mod
         if mode == MODE_SCHEDULE:
             return PRESET_SCHEDULE
-        
-        # Manual mod - option'a göre
         if mode == MODE_MANUAL:
-            option_to_preset = {
+            return {
                 OPTION_HOME: PRESET_HOME,
                 OPTION_SLEEP: PRESET_SLEEP,
                 OPTION_AWAY: PRESET_AWAY,
                 OPTION_CUSTOM: PRESET_CUSTOM,
-                OPTION_FROZEN: None,  # OFF modunda preset yok
-            }
-            return option_to_preset.get(option)
-        
+            }.get(option)
         return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Ekstra durum özellikleri."""
-        attrs = {}
+        ep = self._endpoint
+        device = ep.get("device", {})
         
-        if self.coordinator.data:
-            attrs["mode"] = self.coordinator.data.get("mode")
-            attrs["option"] = self.coordinator.data.get("option")
-            attrs["combi_state"] = self.coordinator.data.get("combi_state")
-            attrs["is_connected"] = self.coordinator.data.get("is_connected")
-            
-            target_temps = self.coordinator.data.get("target_temperatures", {})
-            attrs["target_temp_home"] = target_temps.get("home")
-            attrs["target_temp_away"] = target_temps.get("away")
-            attrs["target_temp_sleep"] = target_temps.get("sleep")
-            attrs["target_temp_custom"] = target_temps.get("custom")
-        
-        return attrs
+        return {
+            "mode": ep.get("mode"),
+            "option": ep.get("option"),
+            "combi_state": ep.get("combiState"),
+            "operation_mode": ep.get("operationMode"),
+            "is_connected": ep.get("device", {}).get("isConnected", device.get("isConnected")),
+            "home_temperature": ep.get("homeTemperature"),
+            "away_temperature": ep.get("awayTemperature"),
+            "sleep_temperature": ep.get("sleepTemperature"),
+            "custom_temperature": ep.get("customTemperature"),
+            "firmware_version": device.get("version"),
+            "hardware_version": device.get("hardwareVersion"),
+            "mac_address": device.get("macAddress"),
+            "serial_number": device.get("serialNo"),
+            "battery_voltage": ep.get("batteryVoltage"),
+            "power_source": ep.get("powerSource"),
+            "power_state": ep.get("powerState"),
+            "rssi": ep.get("rssi"),
+            "child_lock": ep.get("childLock"),
+            "open_window_state": ep.get("openWindowState"),
+            "calibration": ep.get("calibration"),
+        }
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """HVAC modunu değiştir.
-        
-        - OFF: mode=manual, option=frozen
-        - HEAT: Son bilinen preset'e dön veya home
-        """
         if hvac_mode == HVACMode.OFF:
-            # Kapalı modu
             await self.coordinator.async_set_mode(MODE_MANUAL, OPTION_FROZEN)
         else:
-            # Isıtmayı aç - son preset'e dön
             preset = self._last_preset or PRESET_HOME
             await self.async_set_preset_mode(preset)
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Preset modunu değiştir.
-        
-        Preset'e göre uygun API çağrısı yapılır.
-        """
-        # Son preset'i kaydet (OFF'dan dönüş için)
         if preset_mode not in (None, OPTION_FROZEN):
             self._last_preset = preset_mode
         
@@ -443,39 +232,26 @@ class CosaClimate(CoordinatorEntity[CosaCoordinator], ClimateEntity):
         elif preset_mode == PRESET_SCHEDULE:
             await self.coordinator.async_set_mode(MODE_SCHEDULE)
         else:
-            # Manual modlar
-            preset_to_option = {
+            option = {
                 PRESET_HOME: OPTION_HOME,
                 PRESET_SLEEP: OPTION_SLEEP,
                 PRESET_AWAY: OPTION_AWAY,
                 PRESET_CUSTOM: OPTION_CUSTOM,
-            }
-            option = preset_to_option.get(preset_mode, OPTION_HOME)
+            }.get(preset_mode, OPTION_HOME)
             await self.coordinator.async_set_mode(MODE_MANUAL, option)
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
-        """Hedef sıcaklığı ayarla.
-        
-        Aktif preset'e göre ilgili sıcaklık güncellenir.
-        Tüm preset sıcaklıkları tek API çağrısıyla gönderilir.
-        """
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
         
-        # Mevcut sıcaklıkları al
-        current_temps = {}
-        if self.coordinator.data:
-            current_temps = self.coordinator.data.get("target_temperatures", {})
+        ep = self._endpoint
+        home = ep.get("homeTemperature", 20.0)
+        away = ep.get("awayTemperature", 15.0)
+        sleep = ep.get("sleepTemperature", 18.0)
+        custom = ep.get("customTemperature", 20.0)
         
-        home = current_temps.get("home", 20.0)
-        away = current_temps.get("away", 15.0)
-        sleep = current_temps.get("sleep", 18.0)
-        custom = current_temps.get("custom", 20.0)
-        
-        # Aktif preset'e göre sıcaklığı güncelle
         preset = self.preset_mode or PRESET_HOME
-        
         if preset == PRESET_HOME:
             home = temperature
         elif preset == PRESET_AWAY:
@@ -484,18 +260,13 @@ class CosaClimate(CoordinatorEntity[CosaCoordinator], ClimateEntity):
             sleep = temperature
         elif preset == PRESET_CUSTOM:
             custom = temperature
-        elif preset in (PRESET_AUTO, PRESET_SCHEDULE):
-            # Auto/schedule modunda home sıcaklığını güncelle
+        else:
             home = temperature
         
-        # Sıcaklıkları API'ye gönder
         await self.coordinator.async_set_temperatures(home, away, sleep, custom)
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Koordinatör güncellemelerini işle."""
-        # Son preset'i güncelle (OFF değilse)
         if self.preset_mode and self.preset_mode != OPTION_FROZEN:
             self._last_preset = self.preset_mode
-        
         self.async_write_ha_state()
