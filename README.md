@@ -4,7 +4,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/ahamitd/cosa-homeassistant)](https://github.com/ahamitd/cosa-homeassistant/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-<p align="center">
+<p>
   <img src="custom_components/cosa/icon.png" alt="COSA Logo" width="128">
 </p>
 
