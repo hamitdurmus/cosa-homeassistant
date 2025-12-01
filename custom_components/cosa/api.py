@@ -1,492 +1,463 @@
-"""API client for COSA integration."""
+"""COSA Smart Thermostat API Client.
+
+Bu modül COSA termostat API'si ile iletişimi sağlar.
+Tüm endpoint'ler ve request body yapıları gerçek mobil uygulama
+trafiğinden alınmıştır.
+
+API Endpoint'leri:
+- POST /api/users/login → JWT Token alma
+- POST /api/users/getInfo → Kullanıcı bilgisi ve endpoint'ler
+- POST /api/endpoints/setMode → Mod değiştirme
+- POST /api/endpoints/setTargetTemperatures → Sıcaklık ayarı
+"""
+
+from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Optional
+
 import aiohttp
 
 from .const import (
     API_BASE_URL,
     API_TIMEOUT,
     ENDPOINT_LOGIN,
-    ENDPOINT_GET_ENDPOINT,
+    ENDPOINT_GET_INFO,
     ENDPOINT_SET_MODE,
     ENDPOINT_SET_TARGET_TEMPERATURES,
-    ENDPOINT_LIST_ENDPOINTS,
-    ENDPOINT_SET_OPTION,
-    USER_AGENT,
-    CONTENT_TYPE,
+    HEADER_USER_AGENT,
+    HEADER_CONTENT_TYPE,
+    HEADER_PROVIDER,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class CosaAPIError(Exception):
-    """Exception raised for API errors."""
-
+    """COSA API hatası."""
     pass
 
 
-class CosaAPIClient:
-    """Client for COSA API."""
+class CosaAuthError(CosaAPIError):
+    """Kimlik doğrulama hatası."""
+    pass
 
-    def __init__(
-        self,
-        username: str | None = None,
-        password: str | None = None,
-        endpoint_id: Optional[str] = None,
-        token: Optional[str] = None,
-        session: Optional[aiohttp.ClientSession] = None,
-    ):
-        """Initialize the API client."""
-        self._username = username
-        self._password = password
-        self._endpoint_id = endpoint_id
-        self._token: Optional[str] = None
-        # Allow passing a pre-existing token (e.g. from a proxy or manual config)
-        if token:
-            self._token = token
-        # allow passing an existing aiohttp session (recommended: async_get_clientsession(hass))
-        self._session: Optional[aiohttp.ClientSession] = session
-        # Whether the session is created (owned) by this client. If a session is passed in
-        # (e.g., from Home Assistant's async_get_clientsession), we must NOT close it.
-        # This flag will be set to True when we create a new session inside _get_session().
-        self._own_session: bool = False
-        self._retry_count = 3  # Retry count for failed requests
 
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create aiohttp session."""
-        if self._session is None or (hasattr(self._session, "closed") and self._session.closed):
-            # If no session provided, create a new ClientSession with timeout
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT)
-            )
-            # We created this session; we are responsible for closing it later
-            self._own_session = True
-        return self._session
+class CosaAPI:
+    """COSA Termostat API İstemcisi.
+    
+    Gerçek mobil uygulama trafiğine %100 uyumlu API istemcisi.
+    
+    Kullanım:
+        api = CosaAPI(session)
+        token = await api.login(email, password)
+        info = await api.get_user_info(token)
+        await api.set_mode(token, endpoint_id, "manual", "home")
+        await api.set_target_temperatures(token, endpoint_id, {...})
+    """
 
-    async def close(self):
-        """Close the session."""
-        if self._session and not self._session.closed and self._own_session:
-            # Only close if we created the session in _get_session; don't close a session
-            # passed in by Home Assistant (async_get_clientsession)
-            await self._session.close()
-            self._session = None
-            self._own_session = False
-
-    async def login(self) -> bool:
-        """Login and get authentication token."""
-        # Try different login endpoints and payload formats
-        login_endpoints = [
-            "/users/login",
-            "/auth/login",
-            "/login",
-        ]
+    def __init__(self, session: aiohttp.ClientSession) -> None:
+        """API istemcisini başlat.
         
-        payload_formats = [
-            {"username": self._username, "password": self._password},
-            {"email": self._username, "password": self._password},
-            {"user": self._username, "password": self._password},
-        ]
+        Args:
+            session: Home Assistant'ın aiohttp oturumu (async_get_clientsession)
+        """
+        self._session = session
 
-        session = await self._get_session()
-        last_error = None
-
-        for endpoint in login_endpoints:
-            for payload in payload_formats:
-                try:
-                    url = f"{API_BASE_URL}{endpoint}"
-                    headers = {
-                        "User-Agent": USER_AGENT,
-                        "Content-Type": CONTENT_TYPE,
-                    }
-
-                    _LOGGER.debug("Attempting login to %s with payload keys: %s", url, list(payload.keys()))
-                    async with session.post(url, json=payload, headers=headers) as response:
-                        _LOGGER.debug("Login response status %s from %s", response.status, url)
-                        if response.status == 200:
-                            data = await response.json()
-                            
-                            # Try to extract token from various response formats
-                            def find_token(obj):
-                                # Recursively search for token strings in nested structures
-                                if isinstance(obj, dict):
-                                    for k, v in obj.items():
-                                        if k and isinstance(k, str) and k.lower() in ("authtoken", "authtoken", "authtoken", "token", "accesstoken", "access_token", "auth_token"):
-                                            return v
-                                        if isinstance(v, (dict, list)):
-                                            res = find_token(v)
-                                            if res:
-                                                return res
-                                elif isinstance(obj, list):
-                                    for i in obj:
-                                        res = find_token(i)
-                                        if res:
-                                            return res
-                                return None
-
-                            token = find_token(data)
-
-                            # Log response for debugging if token not found
-                            if not token:
-                                _LOGGER.debug("Response data keys: %s", list(data.keys()) if isinstance(data, dict) else "Not a dict")
-                                _LOGGER.debug("Response preview: %s", str(data)[:200] if data else "Empty response")
-
-                            if token:
-                                self._token = token
-                                
-                                # Try to extract endpoint ID from response
-                                if not self._endpoint_id:
-                                    def find_endpoint_id(obj):
-                                        if isinstance(obj, dict):
-                                            # endpoint or endpoints keys
-                                            if "endpoint" in obj:
-                                                endpoint_data = obj.get("endpoint")
-                                                if isinstance(endpoint_data, list) and len(endpoint_data) > 0:
-                                                    return endpoint_data[0].get("id") or endpoint_data[0].get("_id") or endpoint_data[0].get("endpoint")
-                                                elif isinstance(endpoint_data, dict):
-                                                    return endpoint_data.get("id") or endpoint_data.get("_id") or endpoint_data.get("endpoint")
-                                            if "endpoints" in obj:
-                                                endpoints = obj.get("endpoints")
-                                                if isinstance(endpoints, list) and len(endpoints) > 0:
-                                                    return endpoints[0].get("id") or endpoints[0].get("_id") or endpoints[0].get("endpoint")
-                                            # nested data
-                                            if "data" in obj and isinstance(obj["data"], (dict, list)):
-                                                return find_endpoint_id(obj["data"])
-                                            # try nested keys
-                                            for v in obj.values():
-                                                if isinstance(v, (dict, list)):
-                                                    res = find_endpoint_id(v)
-                                                    if res:
-                                                        return res
-                                        elif isinstance(obj, list):
-                                            for item in obj:
-                                                res = find_endpoint_id(item)
-                                                if res:
-                                                    return res
-                                        return None
-
-                                    found_id = find_endpoint_id(data)
-                                    if found_id:
-                                        self._endpoint_id = found_id
-
-                                _LOGGER.info("Successfully logged in to COSA API")
-                                return True
-                            else:
-                                _LOGGER.debug("Token not found in response from %s", endpoint)
-                                continue
-                        elif response.status == 401:
-                            # Invalid credentials, don't try other formats
-                            error_text = await response.text()
-                            _LOGGER.error("Invalid credentials: %s", error_text)
-                            raise CosaAPIError("Invalid username or password")
-                        else:
-                            error_text = await response.text()
-                            _LOGGER.debug("Login response status %s from %s", response.status, url)
-                            _LOGGER.debug(
-                                "Login attempt failed with status %s: %s", response.status, error_text
-                            )
-                            last_error = f"Status {response.status}: {error_text}"
-                            continue
-
-                except aiohttp.ClientError as err:
-                    _LOGGER.debug("Error connecting to %s: %s", endpoint, err)
-                    last_error = f"Connection error: {err}"
-                    continue
-                except CosaAPIError:
-                    # Re-raise authentication errors
-                    raise
-                except Exception as err:
-                    _LOGGER.debug("Unexpected error during login: %s", err)
-                    last_error = f"Unexpected error: {err}"
-                    continue
-
-        # If we get here, all login attempts failed
-        raise CosaAPIError(f"Login failed. Last error: {last_error}")
-
-    def _get_headers(self) -> Dict[str, str]:
-        """Get headers for API requests."""
-        if not self._token:
-            raise CosaAPIError("Not authenticated. Please login first.")
-
-        # API expects authtoken (lowercase) in headers based on working config
-        # Some servers use authToken camelCase, some use authtoken lowercase; include both to be tolerant
-        headers = {
-            "authToken": self._token,
-            "authtoken": self._token,
-            "User-Agent": USER_AGENT,
-            "Content-Type": CONTENT_TYPE,
+    def _get_base_headers(self) -> dict[str, str]:
+        """Temel HTTP header'larını döndür.
+        
+        Returns:
+            Gerçek Cosa uygulamasının kullandığı header'lar
+        """
+        return {
+            "User-Agent": HEADER_USER_AGENT,
+            "Content-Type": HEADER_CONTENT_TYPE,
+            "provider": HEADER_PROVIDER,
         }
+
+    def _get_auth_headers(self, token: str) -> dict[str, str]:
+        """Kimlik doğrulamalı header'ları döndür.
+        
+        Args:
+            token: JWT auth token
+            
+        Returns:
+            authtoken header'ı eklenmiş header'lar
+        """
+        headers = self._get_base_headers()
+        headers["authtoken"] = token
         return headers
 
-    async def get_endpoint_status(self, endpoint_id: Optional[str] = None) -> Dict[str, Any]:
-        """Get endpoint status."""
-        endpoint = endpoint_id or self._endpoint_id
-        if not endpoint:
-            raise CosaAPIError("Endpoint ID is required")
+    async def login(self, email: str, password: str) -> str:
+        """Kullanıcı girişi yap ve JWT token al.
+        
+        API Request:
+            POST https://kiwi-api.nuvia.com.tr/api/users/login
+            Body: {"email": "<email>", "password": "<password>"}
+        
+        Args:
+            email: Kullanıcı e-posta adresi
+            password: Kullanıcı şifresi
+            
+        Returns:
+            JWT auth token
+            
+        Raises:
+            CosaAuthError: Geçersiz kimlik bilgileri
+            CosaAPIError: API hatası
+        """
+        url = f"{API_BASE_URL}{ENDPOINT_LOGIN}"
+        
+        # Gerçek API body yapısı - email kullanıyor
+        payload = {
+            "email": email,
+            "password": password,
+        }
+        
+        _LOGGER.debug("Login isteği gönderiliyor: %s", url)
+        
+        try:
+            async with self._session.post(
+                url,
+                json=payload,
+                headers=self._get_base_headers(),
+                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
+            ) as response:
+                response_text = await response.text()
+                _LOGGER.debug("Login yanıtı: status=%s", response.status)
+                
+                if response.status == 401:
+                    _LOGGER.error("Geçersiz kimlik bilgileri")
+                    raise CosaAuthError("Geçersiz e-posta veya şifre")
+                
+                if response.status != 200:
+                    _LOGGER.error("Login hatası: %s - %s", response.status, response_text)
+                    raise CosaAPIError(f"Login başarısız: HTTP {response.status}")
+                
+                data = await response.json()
+                
+                # Token'ı yanıttan çıkar
+                token = self._extract_token(data)
+                if not token:
+                    _LOGGER.error("Token yanıtta bulunamadı: %s", data)
+                    raise CosaAPIError("Token yanıtta bulunamadı")
+                
+                _LOGGER.info("COSA API'ye başarıyla giriş yapıldı")
+                return token
+                
+        except aiohttp.ClientError as err:
+            _LOGGER.error("Bağlantı hatası: %s", err)
+            raise CosaAPIError(f"Bağlantı hatası: {err}") from err
 
-        for attempt in range(self._retry_count):
-            try:
-                session = await self._get_session()
-                url = f"{API_BASE_URL}{ENDPOINT_GET_ENDPOINT}"
+    def _extract_token(self, data: dict) -> Optional[str]:
+        """API yanıtından token'ı çıkar.
+        
+        Args:
+            data: API yanıtı
+            
+        Returns:
+            JWT token veya None
+        """
+        # Olası token alanları
+        token_keys = ["authtoken", "authToken", "token", "accessToken", "access_token"]
+        
+        # Doğrudan üst seviyede ara
+        for key in token_keys:
+            if key in data and isinstance(data[key], str):
+                return data[key]
+        
+        # data wrapper içinde ara
+        if "data" in data and isinstance(data["data"], dict):
+            for key in token_keys:
+                if key in data["data"] and isinstance(data["data"][key], str):
+                    return data["data"][key]
+        
+        return None
 
-                payload = {"endpoint": endpoint}
-                headers = self._get_headers()
-
-                async with session.post(url, json=payload, headers=headers) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        # Normalize nested data - other integration style
-                        if isinstance(data, dict):
-                            if "endpoint" in data:
-                                return data["endpoint"]
-                            elif "data" in data and isinstance(data["data"], dict):
-                                nested = data["data"]
-                                if "endpoint" in nested:
-                                    return nested["endpoint"]
-                                else:
-                                    return nested
-                            else:
-                                return data
-                        return data
-                    elif response.status == 401:
-                        # Token expired, try to re-login
-                        _LOGGER.warning("Token expired, attempting to re-login")
-                        await self.login()
-                        if attempt < self._retry_count - 1:
-                            continue
-                    else:
-                        error_text = await response.text()
-                        _LOGGER.error(
-                            "Get endpoint status failed with status %s: %s",
-                            response.status,
-                            error_text,
-                        )
-                        if attempt < self._retry_count - 1:
-                            continue
-                        raise CosaAPIError(f"Get status failed: {response.status}")
-
-            except aiohttp.ClientError as err:
-                _LOGGER.error("Error getting endpoint status (attempt %d): %s", attempt + 1, err)
-                if attempt < self._retry_count - 1:
-                    continue
-                raise CosaAPIError(f"Connection error: {err}") from err
-
-        raise CosaAPIError("Failed to get endpoint status after retries")
+    async def get_user_info(self, token: str) -> dict[str, Any]:
+        """Kullanıcı bilgilerini ve endpoint'leri al.
+        
+        API Request:
+            POST https://kiwi-api.nuvia.com.tr/api/users/getInfo
+            Header: authtoken: <token>
+        
+        Bu çağrıdan dönen veriler:
+        - endpoint id'leri
+        - cihaz bilgileri (sıcaklık, nem, mod, option, targetTemperatures)
+        - cihaz adları
+        
+        Args:
+            token: JWT auth token
+            
+        Returns:
+            Kullanıcı bilgileri ve endpoint verileri
+            
+        Raises:
+            CosaAuthError: Token geçersiz/süresi dolmuş
+            CosaAPIError: API hatası
+        """
+        url = f"{API_BASE_URL}{ENDPOINT_GET_INFO}"
+        
+        _LOGGER.debug("GetInfo isteği gönderiliyor: %s", url)
+        
+        try:
+            async with self._session.post(
+                url,
+                json={},
+                headers=self._get_auth_headers(token),
+                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
+            ) as response:
+                if response.status == 401:
+                    _LOGGER.warning("Token geçersiz veya süresi dolmuş")
+                    raise CosaAuthError("Token geçersiz veya süresi dolmuş")
+                
+                if response.status != 200:
+                    response_text = await response.text()
+                    _LOGGER.error("GetInfo hatası: %s - %s", response.status, response_text)
+                    raise CosaAPIError(f"GetInfo başarısız: HTTP {response.status}")
+                
+                data = await response.json()
+                _LOGGER.debug("GetInfo yanıtı alındı")
+                return data
+                
+        except aiohttp.ClientError as err:
+            _LOGGER.error("Bağlantı hatası: %s", err)
+            raise CosaAPIError(f"Bağlantı hatası: {err}") from err
 
     async def set_mode(
         self,
+        token: str,
+        endpoint_id: str,
         mode: str,
-        option: str,
-        endpoint_id: Optional[str] = None,
+        option: Optional[str] = None,
     ) -> bool:
-        """Set endpoint mode."""
-        endpoint = endpoint_id or self._endpoint_id
-        if not endpoint:
-            raise CosaAPIError("Endpoint ID is required")
-
+        """Termostat modunu değiştir.
+        
+        API Request:
+            POST https://kiwi-api.nuvia.com.tr/api/endpoints/setMode
+            Header: authtoken: <token>, provider: cosa
+            
+        Body Yapıları:
+        
+        1. Haftalık Program:
+           {"endpoint": "<id>", "mode": "schedule"}
+           
+        2. Otomatik Kontrol:
+           {"endpoint": "<id>", "mode": "auto"}
+           
+        3. Manuel - Ev Modu:
+           {"endpoint": "<id>", "mode": "manual", "option": "home"}
+           
+        4. Manuel - Uyku Modu:
+           {"endpoint": "<id>", "mode": "manual", "option": "sleep"}
+           
+        5. Manuel - Dışarı Modu:
+           {"endpoint": "<id>", "mode": "manual", "option": "away"}
+           
+        6. Manuel - Kullanıcı Modu:
+           {"endpoint": "<id>", "mode": "manual", "option": "custom"}
+           
+        7. Kapalı (Frozen):
+           {"endpoint": "<id>", "mode": "manual", "option": "frozen"}
+        
+        Args:
+            token: JWT auth token
+            endpoint_id: Termostat endpoint ID'si
+            mode: "schedule", "auto", veya "manual"
+            option: Manual mod için: "home", "sleep", "away", "custom", "frozen"
+            
+        Returns:
+            True başarılı ise
+            
+        Raises:
+            CosaAuthError: Token geçersiz
+            CosaAPIError: API hatası
+        """
+        url = f"{API_BASE_URL}{ENDPOINT_SET_MODE}"
+        
+        # Request body oluştur
+        payload: dict[str, Any] = {
+            "endpoint": endpoint_id,
+            "mode": mode,
+        }
+        
+        # Manual mod için option ekle
+        if mode == "manual" and option:
+            payload["option"] = option
+        
+        _LOGGER.debug("SetMode isteği: %s - payload=%s", url, payload)
+        
         try:
-            session = await self._get_session()
-            url = f"{API_BASE_URL}{ENDPOINT_SET_MODE}"
-
-            payload = {
-                "endpoint": endpoint,
-                "mode": mode,
-                "option": option,
-            }
-
-            headers = self._get_headers()
-            headers["provider"] = "cosa"
-            headers["content-type"] = CONTENT_TYPE  # Ensure content-type is set
-
-            async with session.post(url, json=payload, headers=headers) as response:
-                if response.status == 200:
-                    _LOGGER.info("Successfully set mode to %s", option)
-                    return True
-                else:
-                    error_text = await response.text()
-                    _LOGGER.error(
-                        "Set mode failed with status %s: %s", response.status, error_text
-                    )
-                    raise CosaAPIError(f"Set mode failed: {response.status}")
-
+            async with self._session.post(
+                url,
+                json=payload,
+                headers=self._get_auth_headers(token),
+                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
+            ) as response:
+                if response.status == 401:
+                    raise CosaAuthError("Token geçersiz veya süresi dolmuş")
+                
+                if response.status != 200:
+                    response_text = await response.text()
+                    _LOGGER.error("SetMode hatası: %s - %s", response.status, response_text)
+                    raise CosaAPIError(f"SetMode başarısız: HTTP {response.status}")
+                
+                _LOGGER.info("Mod başarıyla değiştirildi: mode=%s, option=%s", mode, option)
+                return True
+                
         except aiohttp.ClientError as err:
-            _LOGGER.error("Error setting mode: %s", err)
-            raise CosaAPIError(f"Connection error: {err}") from err
-
-    async def set_option(
-        self,
-        option: str,
-        endpoint_id: Optional[str] = None,
-    ) -> bool:
-        """Set endpoint option."""
-        endpoint = endpoint_id or self._endpoint_id
-        if not endpoint:
-            raise CosaAPIError("Endpoint ID is required")
-
-        try:
-            session = await self._get_session()
-            url = f"{API_BASE_URL}/endpoints/setOption"
-
-            payload = {
-                "endpoint": endpoint,
-                "option": option,
-            }
-
-            headers = self._get_headers()
-            headers["provider"] = "cosa"
-
-            async with session.post(url, json=payload, headers=headers) as response:
-                if response.status == 200:
-                    _LOGGER.info("Successfully set option to %s", option)
-                    return True
-                else:
-                    error_text = await response.text()
-                    _LOGGER.error(
-                        "Set option failed with status %s: %s", response.status, error_text
-                    )
-                    raise CosaAPIError(f"Set option failed: {response.status}")
-
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Error setting option: %s", err)
-            raise CosaAPIError(f"Connection error: {err}") from err
+            _LOGGER.error("Bağlantı hatası: %s", err)
+            raise CosaAPIError(f"Bağlantı hatası: {err}") from err
 
     async def set_target_temperatures(
         self,
-        home_temp: float,
-        away_temp: float,
-        sleep_temp: float,
-        custom_temp: float,
-        endpoint_id: Optional[str] = None,
+        token: str,
+        endpoint_id: str,
+        home: float,
+        away: float,
+        sleep: float,
+        custom: float,
     ) -> bool:
-        """Set target temperatures."""
-        endpoint = endpoint_id or self._endpoint_id
-        if not endpoint:
-            raise CosaAPIError("Endpoint ID is required")
-
-        try:
-            session = await self._get_session()
-            url = f"{API_BASE_URL}{ENDPOINT_SET_TARGET_TEMPERATURES}"
-
-            payload = {
-                "endpoint": endpoint,
+        """Hedef sıcaklıkları ayarla.
+        
+        API Request:
+            POST https://kiwi-api.nuvia.com.tr/api/endpoints/setTargetTemperatures
+            Header: authtoken: <token>, provider: cosa
+            
+        Body:
+            {
+                "endpoint": "<id>",
                 "targetTemperatures": {
-                    "home": home_temp,
-                    "away": away_temp,
-                    "sleep": sleep_temp,
-                    "custom": custom_temp,
-                },
+                    "home": <float>,
+                    "away": <float>,
+                    "sleep": <float>,
+                    "custom": <float>
+                }
             }
-
-            headers = self._get_headers()
-            headers["provider"] = "cosa"
-
-            async with session.post(url, json=payload, headers=headers) as response:
-                if response.status == 200:
-                    _LOGGER.info("Successfully set target temperatures")
-                    return True
-                else:
-                    error_text = await response.text()
-                    _LOGGER.error(
-                        "Set target temperatures failed with status %s: %s",
-                        response.status,
-                        error_text,
-                    )
-                    raise CosaAPIError(f"Set temperatures failed: {response.status}")
-
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Error setting target temperatures: %s", err)
-            raise CosaAPIError(f"Connection error: {err}") from err
-
-    async def list_endpoints(self) -> list[Dict[str, Any]]:
-        """List all endpoints for the user.
-
-        This function tries multiple API endpoints and both GET/POST to maximize
-        compatibility with different API versions.
+        
+        Args:
+            token: JWT auth token
+            endpoint_id: Termostat endpoint ID'si
+            home: Ev modu sıcaklığı
+            away: Dışarı modu sıcaklığı
+            sleep: Uyku modu sıcaklığı
+            custom: Kullanıcı modu sıcaklığı
+            
+        Returns:
+            True başarılı ise
+            
+        Raises:
+            CosaAuthError: Token geçersiz
+            CosaAPIError: API hatası
         """
-        if not self._token:
-            await self.login()
+        url = f"{API_BASE_URL}{ENDPOINT_SET_TARGET_TEMPERATURES}"
+        
+        payload = {
+            "endpoint": endpoint_id,
+            "targetTemperatures": {
+                "home": home,
+                "away": away,
+                "sleep": sleep,
+                "custom": custom,
+            },
+        }
+        
+        _LOGGER.debug("SetTargetTemperatures isteği: %s - payload=%s", url, payload)
+        
+        try:
+            async with self._session.post(
+                url,
+                json=payload,
+                headers=self._get_auth_headers(token),
+                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
+            ) as response:
+                if response.status == 401:
+                    raise CosaAuthError("Token geçersiz veya süresi dolmuş")
+                
+                if response.status != 200:
+                    response_text = await response.text()
+                    _LOGGER.error("SetTargetTemperatures hatası: %s - %s", response.status, response_text)
+                    raise CosaAPIError(f"SetTargetTemperatures başarısız: HTTP {response.status}")
+                
+                _LOGGER.info(
+                    "Hedef sıcaklıklar ayarlandı: home=%.1f, away=%.1f, sleep=%.1f, custom=%.1f",
+                    home, away, sleep, custom
+                )
+                return True
+                
+        except aiohttp.ClientError as err:
+            _LOGGER.error("Bağlantı hatası: %s", err)
+            raise CosaAPIError(f"Bağlantı hatası: {err}") from err
 
-        session = await self._get_session()
-        possible_list_endpoints = [ENDPOINT_LIST_ENDPOINTS, "/endpoints/getEndpoints", "/endpoints/getEndpoints/"]
-        headers = self._get_headers()
 
-        last_error = None
-        for list_endpoint in possible_list_endpoints:
-            url = f"{API_BASE_URL}{list_endpoint}"
+def parse_endpoint_data(user_info: dict[str, Any]) -> list[dict[str, Any]]:
+    """GetInfo yanıtından endpoint verilerini çıkar.
+    
+    Args:
+        user_info: GetInfo API yanıtı
+        
+    Returns:
+        Endpoint listesi
+    """
+    endpoints = []
+    
+    # Olası yapılar
+    if isinstance(user_info, dict):
+        # data.endpoints yapısı
+        if "data" in user_info and isinstance(user_info["data"], dict):
+            data = user_info["data"]
+            if "endpoints" in data and isinstance(data["endpoints"], list):
+                endpoints = data["endpoints"]
+            elif "endpoint" in data:
+                ep = data["endpoint"]
+                endpoints = ep if isinstance(ep, list) else [ep]
+        # endpoints doğrudan
+        elif "endpoints" in user_info and isinstance(user_info["endpoints"], list):
+            endpoints = user_info["endpoints"]
+        elif "endpoint" in user_info:
+            ep = user_info["endpoint"]
+            endpoints = ep if isinstance(ep, list) else [ep]
+    elif isinstance(user_info, list):
+        endpoints = user_info
+    
+    return endpoints
 
-            # Try GET then POST
-            for method in ("get", "post"):
-                try:
-                    _LOGGER.debug("Listing endpoints using %s %s", method.upper(), url)
-                    if method == "get":
-                        async with session.get(url, headers=headers) as response:
-                            status = response.status
-                            text = await response.text()
-                            if status != 200:
-                                # If 401 attempt login and retry once later
-                                last_error = f"Status {status}: {text}"
-                                if status == 401:
-                                    break
-                                continue
-                            data = await response.json()
-                    else:
-                        async with session.post(url, json={}, headers=headers) as response:
-                            status = response.status
-                            text = await response.text()
-                            if status != 200:
-                                last_error = f"Status {status}: {text}"
-                                if status == 401:
-                                    break
-                                continue
-                            data = await response.json()
 
-                    # Normalize response
-                    if isinstance(data, list):
-                        return data
-                    if isinstance(data, dict) and "data" in data and isinstance(data["data"], (list, dict)):
-                        nested = data["data"]
-                        if isinstance(nested, list):
-                            return nested
-                        if isinstance(nested, dict):
-                            if "endpoints" in nested:
-                                endpoints = nested["endpoints"]
-                                return endpoints if isinstance(endpoints, list) else [endpoints]
-                            if "endpoint" in nested:
-                                endpoint = nested["endpoint"]
-                                return endpoint if isinstance(endpoint, list) else [endpoint]
-                            return [nested]
-                    if isinstance(data, dict):
-                        if "endpoints" in data:
-                            endpoints = data["endpoints"]
-                            return endpoints if isinstance(endpoints, list) else [endpoints]
-                        if "endpoint" in data:
-                            endpoint = data["endpoint"]
-                            return endpoint if isinstance(endpoint, list) else [endpoint]
-                    # Unrecognized structure, continue to next method/endpoint
-                    continue
-                except CosaAPIError:
-                    raise
-                except aiohttp.ClientError as err:
-                    _LOGGER.debug("Connection error on list_endpoints: %s", err)
-                    last_error = str(err)
-                    continue
-
-        # If we get here, all attempts failed
-        if last_error:
-            # Authentication issue? try to re-login if possible
-            if "401" in last_error or "invalid" in last_error.lower():
-                _LOGGER.warning("Token expired or invalid while listing endpoints, attempting re-login")
-                await self.login()
-                # Try again with primary endpoint using POST
-                try:
-                    async with session.post(f"{API_BASE_URL}{ENDPOINT_GET_ENDPOINT}", json={}, headers=self._get_headers()) as retry_resp:
-                        if retry_resp.status == 200:
-                            data = await retry_resp.json()
-                            if isinstance(data, list):
-                                return data
-                            if isinstance(data, dict) and "endpoints" in data:
-                                return data["endpoints"] if isinstance(data["endpoints"], list) else [data["endpoints"]]
-                except Exception:
-                    pass
-            raise CosaAPIError(f"Failed to list endpoints: {last_error}")
-
+def extract_endpoint_state(endpoint: dict[str, Any]) -> dict[str, Any]:
+    """Endpoint verisinden durum bilgilerini çıkar.
+    
+    Args:
+        endpoint: Endpoint verisi
+        
+    Returns:
+        Normalize edilmiş durum bilgisi
+    """
+    target_temps = endpoint.get("targetTemperatures", {})
+    option = endpoint.get("option", "home")
+    mode = endpoint.get("mode", "manual")
+    
+    # Aktif preset'e göre hedef sıcaklığı belirle
+    if mode in ("auto", "schedule"):
+        # Auto/schedule modunda home sıcaklığını kullan
+        current_target = target_temps.get("home")
+    else:
+        # Manual modda aktif option'a göre sıcaklık
+        current_target = target_temps.get(option, target_temps.get("home"))
+    
+    return {
+        "endpoint_id": endpoint.get("_id") or endpoint.get("id") or endpoint.get("endpoint"),
+        "name": endpoint.get("name", "COSA Termostat"),
+        "temperature": endpoint.get("temperature"),
+        "humidity": endpoint.get("humidity"),
+        "target_temperature": current_target,
+        "mode": mode,
+        "option": option,
+        "combi_state": endpoint.get("combiState", "off"),
+        "target_temperatures": {
+            "home": target_temps.get("home", 20.0),
+            "away": target_temps.get("away", 15.0),
+            "sleep": target_temps.get("sleep", 18.0),
+            "custom": target_temps.get("custom", 20.0),
+        },
+    }

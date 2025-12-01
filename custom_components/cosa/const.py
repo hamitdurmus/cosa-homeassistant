@@ -1,40 +1,62 @@
-"""Constants for COSA integration."""
+"""Constants for COSA Smart Thermostat integration.
+
+Bu dosya COSA termostat entegrasyonu için tüm sabitleri içerir.
+API endpoint'leri gerçek mobil uygulama trafiğinden alınmıştır.
+"""
 from datetime import timedelta
 
+# =============================================================================
+# DOMAIN VE PLATFORM
+# =============================================================================
 DOMAIN = "cosa"
-PLATFORM = "climate"
+PLATFORMS = ["climate", "sensor"]
 
-# API Configuration
-API_BASE_URL = "https://kiwi.cosa.com.tr"
+# =============================================================================
+# API KONFİGÜRASYONU
+# Gerçek Cosa mobil uygulaması API trafiğinden alınmıştır
+# =============================================================================
+API_BASE_URL = "https://kiwi-api.nuvia.com.tr"
 API_TIMEOUT = 30
 
-# API Endpoints
+# =============================================================================
+# API ENDPOINT'LERİ
+# POST https://kiwi-api.nuvia.com.tr/api/users/login → Login
+# POST https://kiwi-api.nuvia.com.tr/api/users/getInfo → Kullanıcı bilgisi + endpoint'ler
+# POST https://kiwi-api.nuvia.com.tr/api/endpoints/setMode → Mod değiştirme
+# POST https://kiwi-api.nuvia.com.tr/api/endpoints/setTargetTemperatures → Sıcaklık ayarı
+# =============================================================================
 ENDPOINT_LOGIN = "/api/users/login"
-ENDPOINT_GET_ENDPOINT = "/api/endpoints/getEndpoint"
+ENDPOINT_GET_INFO = "/api/users/getInfo"
 ENDPOINT_SET_MODE = "/api/endpoints/setMode"
 ENDPOINT_SET_TARGET_TEMPERATURES = "/api/endpoints/setTargetTemperatures"
-ENDPOINT_LIST_ENDPOINTS = "/api/endpoints/getEndpoints/"
-ENDPOINT_SET_OPTION = "/api/endpoints/setOption"
-ENDPOINT_USER_INFO = "/api/users/getInfo"
 
-# Headers
-USER_AGENT = "Cosa/1 CFNetwork/1498.700.2 Darwin/23.6.0"
-CONTENT_TYPE = "application/json"
+# =============================================================================
+# HTTP HEADER'LARI
+# Gerçek Cosa iOS uygulaması User-Agent'ı kullanılıyor
+# =============================================================================
+HEADER_USER_AGENT = "Cosa/1 CFNetwork/3860.200.71 Darwin/25.1.0"
+HEADER_CONTENT_TYPE = "application/json"
+HEADER_PROVIDER = "cosa"
 
-# Climate Modes
-MODE_HOME = "home"
-MODE_SLEEP = "sleep"
-MODE_AWAY = "away"
-MODE_CUSTOM = "custom"
-MODE_FROZEN = "frozen"  # Off mode
+# =============================================================================
+# MOD DEĞERLERİ
+# API'de kullanılan mod isimleri
+# =============================================================================
+# Ana modlar (mode parametresi için)
+MODE_MANUAL = "manual"
 MODE_AUTO = "auto"
 MODE_SCHEDULE = "schedule"
 
-# Home Assistant Climate Modes
-HA_MODE_HEAT = "heat"
-HA_MODE_OFF = "off"
+# Option değerleri (manual mod için option parametresi)
+OPTION_HOME = "home"       # Ev modu
+OPTION_SLEEP = "sleep"     # Uyku modu
+OPTION_AWAY = "away"       # Dışarı modu
+OPTION_CUSTOM = "custom"   # Kullanıcı modu
+OPTION_FROZEN = "frozen"   # Kapalı modu (donma koruması)
 
-# Preset Modes
+# =============================================================================
+# HOME ASSISTANT PRESET MOD İSİMLERİ
+# =============================================================================
 PRESET_HOME = "home"
 PRESET_SLEEP = "sleep"
 PRESET_AWAY = "away"
@@ -42,11 +64,15 @@ PRESET_CUSTOM = "custom"
 PRESET_AUTO = "auto"
 PRESET_SCHEDULE = "schedule"
 
-# Temperature limits
-MIN_TEMP = 5
-MAX_TEMP = 32
-TEMP_STEP = 0.1
+# =============================================================================
+# SICAKLIK LİMİTLERİ
+# =============================================================================
+MIN_TEMP = 5.0
+MAX_TEMP = 32.0
+TEMP_STEP = 0.5
 
-# Update interval
-SCAN_INTERVAL = timedelta(seconds=60)  # seconds; DataUpdateCoordinator expects a timedelta
-
+# =============================================================================
+# GÜNCELLEME ARALIĞI
+# Her 10 saniyede bir API'den veri çekilecek
+# =============================================================================
+SCAN_INTERVAL = timedelta(seconds=10)

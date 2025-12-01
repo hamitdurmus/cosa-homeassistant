@@ -2,18 +2,17 @@
   "config": {
     "step": {
       "user": {
-        "title": "COSA Termostat Kurulumu",
-        "description": "COSA uygulamasındaki kullanıcı adı ve şifrenizi girin",
+        "title": "COSA Termostat Bağlantısı",
+        "description": "COSA hesap bilgilerinizi girin.",
         "data": {
-          "username": "Kullanıcı Adı",
-          "password": "Şifre",
-          "endpoint_id": "Endpoint ID (Opsiyonel)"
+          "email": "E-posta",
+          "password": "Şifre"
         }
       }
     },
     "error": {
-      "cannot_connect": "COSA API'sine bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.",
-      "invalid_auth": "Kullanıcı adı veya şifre hatalı. Lütfen tekrar deneyin.",
+      "cannot_connect": "Bağlantı kurulamadı. Lütfen internet bağlantınızı kontrol edin.",
+      "invalid_auth": "Geçersiz e-posta veya şifre.",
       "unknown": "Beklenmeyen bir hata oluştu."
     },
     "abort": {
@@ -22,32 +21,19 @@
   },
   "entity": {
     "climate": {
-      "preset_mode": {
-        "state": {
-          "home": "Ev",
-          "away": "Dışarıda",
-          "sleep": "Uyku",
-          "custom": "Özel",
-          "auto": "Otomatik",
-          "schedule": "Program"
-        }
+      "cosa_thermostat": {
+        "name": "Termostat"
       }
     },
     "sensor": {
-      "combi_state": {
-        "name": "Kombi Durumu"
-      },
-      "operation_mode": {
-        "name": "Çalışma Modu"
-      },
       "temperature": {
-        "name": "Mevcut Sıcaklık"
-      },
-      "target_temperature": {
-        "name": "Hedef Sıcaklık"
+        "name": "Sıcaklık"
       },
       "humidity": {
-        "name": "Nem Oranı"
+        "name": "Nem"
+      },
+      "combi_state": {
+        "name": "Kombi Durumu"
       }
     }
   }
