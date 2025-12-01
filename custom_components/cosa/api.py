@@ -38,8 +38,23 @@ class CosaAuthError(CosaAPIError):
 class CosaAPI:
     """COSA Termostat API İstemcisi."""
 
-    def __init__(self, session: aiohttp.ClientSession) -> None:
+    def __init__(self, session: Optional[aiohttp.ClientSession] = None) -> None:
         self._session = session
+        self._own_session = False
+        self._token: Optional[str] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Session al veya oluştur."""
+        if self._session is None:
+            self._session = aiohttp.ClientSession()
+            self._own_session = True
+        return self._session
+
+    async def close(self) -> None:
+        """Kendi oluşturduğumuz session'ı kapat."""
+        if self._own_session and self._session:
+            await self._session.close()
+            self._session = None
 
     def _get_base_headers(self) -> dict[str, str]:
         return {
@@ -49,18 +64,21 @@ class CosaAPI:
             "Accept": "*/*",
         }
 
-    def _get_auth_headers(self, token: str) -> dict[str, str]:
+    def _get_auth_headers(self, token: Optional[str] = None) -> dict[str, str]:
         headers = self._get_base_headers()
-        headers["authtoken"] = token
+        use_token = token or self._token
+        if use_token:
+            headers["authtoken"] = use_token
         return headers
 
-    async def login(self, email: str, password: str) -> str:
-        """Login ve token al."""
+    async def login(self, email: str, password: str) -> dict[str, Any]:
+        """Login ve token al. Hem config flow hem de normal kullanım için."""
+        session = await self._get_session()
         url = f"{API_BASE_URL}{ENDPOINT_LOGIN}"
         payload = {"email": email, "password": password}
         
         try:
-            async with self._session.post(
+            async with session.post(
                 url, json=payload, headers=self._get_base_headers(),
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
             ) as response:
@@ -68,45 +86,45 @@ class CosaAPI:
                 
                 if data.get("ok") == 0:
                     error_code = data.get("code", "unknown")
-                    if error_code == 111:
-                        raise CosaAuthError("Geçersiz e-posta veya şifre")
-                    raise CosaAPIError(f"API hatası: code={error_code}")
+                    return {"ok": False, "code": error_code}
                 
                 token = data.get("authToken")
-                if not token:
-                    raise CosaAPIError("Token bulunamadı")
+                if token:
+                    self._token = token
                 
-                return token
+                return {"ok": True, "token": token}
                 
         except aiohttp.ClientError as err:
             raise CosaAPIError(f"Bağlantı hatası: {err}") from err
 
-    async def get_endpoints(self, token: str) -> list[dict[str, Any]]:
+    async def get_endpoints(self, token: Optional[str] = None) -> list[dict[str, Any]]:
         """Endpoint listesini al."""
+        session = await self._get_session()
         url = f"{API_BASE_URL}{ENDPOINT_GET_ENDPOINTS}"
         
         try:
-            async with self._session.post(
+            async with session.post(
                 url, json={}, headers=self._get_auth_headers(token),
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
             ) as response:
                 data = await response.json()
                 
                 if data.get("ok") == 0:
-                    raise CosaAPIError(f"API hatası: {data.get('code')}")
+                    return []
                 
                 return data.get("endpoints", [])
                 
         except aiohttp.ClientError as err:
             raise CosaAPIError(f"Bağlantı hatası: {err}") from err
 
-    async def get_endpoint_detail(self, token: str, endpoint_id: str) -> dict[str, Any]:
+    async def get_endpoint_detail(self, endpoint_id: str, token: Optional[str] = None) -> dict[str, Any]:
         """Endpoint detaylarını al."""
+        session = await self._get_session()
         url = f"{API_BASE_URL}{ENDPOINT_GET_ENDPOINT}"
         payload = {"endpoint": endpoint_id}
         
         try:
-            async with self._session.post(
+            async with session.post(
                 url, json=payload, headers=self._get_auth_headers(token),
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
             ) as response:
@@ -120,13 +138,14 @@ class CosaAPI:
         except aiohttp.ClientError as err:
             raise CosaAPIError(f"Bağlantı hatası: {err}") from err
 
-    async def get_forecast(self, token: str, place_id: str) -> dict[str, Any]:
+    async def get_forecast(self, place_id: str, token: Optional[str] = None) -> dict[str, Any]:
         """Hava durumu tahminini al."""
+        session = await self._get_session()
         url = f"{API_BASE_URL}{ENDPOINT_GET_FORECAST}"
         payload = {"place": place_id}
         
         try:
-            async with self._session.post(
+            async with session.post(
                 url, json=payload, headers=self._get_auth_headers(token),
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
             ) as response:
@@ -141,16 +160,17 @@ class CosaAPI:
             return {}
 
     async def set_mode(
-        self, token: str, endpoint_id: str, mode: str, option: Optional[str] = None
+        self, endpoint_id: str, mode: str, option: Optional[str] = None, token: Optional[str] = None
     ) -> bool:
         """Mod değiştir."""
+        session = await self._get_session()
         url = f"{API_BASE_URL}{ENDPOINT_SET_MODE}"
         payload: dict[str, Any] = {"endpoint": endpoint_id, "mode": mode}
         if option:
             payload["option"] = option
         
         try:
-            async with self._session.post(
+            async with session.post(
                 url, json=payload, headers=self._get_auth_headers(token),
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
             ) as response:
@@ -161,10 +181,12 @@ class CosaAPI:
             raise CosaAPIError(f"Bağlantı hatası: {err}") from err
 
     async def set_target_temperatures(
-        self, token: str, endpoint_id: str,
-        home: float, away: float, sleep: float, custom: float
+        self, endpoint_id: str,
+        home: float, away: float, sleep: float, custom: float,
+        token: Optional[str] = None
     ) -> bool:
         """Hedef sıcaklıkları ayarla."""
+        session = await self._get_session()
         url = f"{API_BASE_URL}{ENDPOINT_SET_TARGET_TEMPERATURES}"
         payload = {
             "endpoint": endpoint_id,
@@ -174,7 +196,7 @@ class CosaAPI:
         }
         
         try:
-            async with self._session.post(
+            async with session.post(
                 url, json=payload, headers=self._get_auth_headers(token),
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
             ) as response:
@@ -184,13 +206,14 @@ class CosaAPI:
         except aiohttp.ClientError as err:
             raise CosaAPIError(f"Bağlantı hatası: {err}") from err
 
-    async def set_child_lock(self, token: str, endpoint_id: str, enabled: bool) -> bool:
+    async def set_child_lock(self, endpoint_id: str, enabled: bool, token: Optional[str] = None) -> bool:
         """Çocuk kilidini ayarla."""
+        session = await self._get_session()
         url = f"{API_BASE_URL}{ENDPOINT_SET_COMBI_SETTINGS}"
         payload = {"endpoint": endpoint_id, "childLock": enabled}
         
         try:
-            async with self._session.post(
+            async with session.post(
                 url, json=payload, headers=self._get_auth_headers(token),
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
             ) as response:

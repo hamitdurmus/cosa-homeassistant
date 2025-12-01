@@ -5,6 +5,9 @@ from datetime import timedelta
 DOMAIN = "cosa"
 PLATFORMS = ["climate", "sensor", "binary_sensor", "switch"]
 
+# Config Keys
+CONF_ENDPOINT_ID = "endpoint_id"
+
 # API Konfigürasyonu
 API_BASE_URL = "https://kiwi-api.nuvia.com.tr"
 API_TIMEOUT = 30

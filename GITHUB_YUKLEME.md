@@ -3,7 +3,7 @@
 ## 1. GitHub Kullanıcı Adınızı ve Repository Adınızı Belirleyin
 
 Örneğin:
-- GitHub kullanıcı adı: `hamitdurmus`
+- GitHub kullanıcı adı: `ahamitd`
 - Repository adı: `cosa-homeassistant`
 
 ## 2. GitHub'da Repository Oluşturun

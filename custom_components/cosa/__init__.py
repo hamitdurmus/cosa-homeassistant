@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import CosaAPI, CosaAPIError
-from .const import DOMAIN, PLATFORMS
+from .const import DOMAIN, PLATFORMS, CONF_ENDPOINT_ID
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,35 +22,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
     api = CosaAPI(session)
     
-    email = entry.data["email"]
-    password = entry.data["password"]
+    email = entry.data[CONF_EMAIL]
+    password = entry.data[CONF_PASSWORD]
+    endpoint_id = entry.data.get(CONF_ENDPOINT_ID)
     
     try:
-        token = await api.login(email, password)
-        endpoints = await api.get_endpoints(token)
-        
-        if not endpoints:
-            _LOGGER.error("Cihaz bulunamadı")
+        # Login
+        login_result = await api.login(email, password)
+        if not login_result.get("ok"):
+            _LOGGER.error("Giriş başarısız")
             return False
         
-        endpoint = endpoints[0]
-        endpoint_id = endpoint.get("id")
+        token = login_result.get("token")
+        
+        # Endpoint ID yoksa ilk cihazı al
+        if not endpoint_id:
+            endpoints = await api.get_endpoints(token)
+            if not endpoints:
+                _LOGGER.error("Cihaz bulunamadı")
+                return False
+            endpoint_id = endpoints[0].get("_id")
         
         # Detaylı bilgi al
-        detail = await api.get_endpoint_detail(token, endpoint_id)
+        detail = await api.get_endpoint_detail(endpoint_id, token)
         
         # Hava durumu al
         place_id = detail.get("place")
         forecast = {}
         if place_id:
-            forecast = await api.get_forecast(token, place_id)
+            forecast = await api.get_forecast(place_id, token)
         
         hass.data[DOMAIN][entry.entry_id] = {
-            "email": email,
-            "password": password,
+            "api": api,
             "token": token,
             "endpoint_id": endpoint_id,
-            "device_name": endpoint.get("name", "COSA Termostat"),
+            "device_name": detail.get("name", "COSA Termostat"),
             "endpoint_detail": detail,
             "forecast": forecast,
             "place_id": place_id,
@@ -68,7 +74,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Entegrasyonu kaldır."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
     
