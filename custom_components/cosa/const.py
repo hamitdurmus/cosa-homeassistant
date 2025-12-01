@@ -51,10 +51,10 @@ PRESET_SCHEDULE = "schedule"
 # Sıcaklık Limitleri
 MIN_TEMP = 5.0
 MAX_TEMP = 32.0
-TEMP_STEP = 0.5
+TEMP_STEP = 0.1  # 0.1 derece adım
 
-# Güncelleme Aralığı
-SCAN_INTERVAL = timedelta(seconds=30)
+# Güncelleme Aralığı - 10 saniye
+SCAN_INTERVAL = timedelta(seconds=10)
 
 # Batarya Seviyeleri
 BATTERY_LEVELS = {

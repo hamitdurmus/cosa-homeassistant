@@ -25,11 +25,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Binary sensor platformunu kur."""
-    entry_data = hass.data[DOMAIN][config_entry.entry_id]
-    coordinator = entry_data.get("coordinator")
-    
-    if not coordinator:
-        return
+    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
     
     entities = [
         CosaConnectedSensor(coordinator, config_entry),

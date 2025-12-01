@@ -13,19 +13,13 @@ from homeassistant.components.climate import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-    UpdateFailed,
-)
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import CosaAPI, CosaAPIError, CosaAuthError
 from .const import (
-    DOMAIN, SCAN_INTERVAL, MIN_TEMP, MAX_TEMP, TEMP_STEP,
+    DOMAIN, MIN_TEMP, MAX_TEMP, TEMP_STEP,
     MODE_MANUAL, MODE_AUTO, MODE_SCHEDULE,
     OPTION_HOME, OPTION_SLEEP, OPTION_AWAY, OPTION_CUSTOM, OPTION_FROZEN,
     PRESET_HOME, PRESET_SLEEP, PRESET_AWAY, PRESET_CUSTOM, PRESET_AUTO, PRESET_SCHEDULE,
@@ -40,78 +34,8 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Climate platformunu kur."""
-    entry_data = hass.data[DOMAIN][config_entry.entry_id]
-    
-    coordinator = CosaCoordinator(hass, config_entry, entry_data)
-    await coordinator.async_config_entry_first_refresh()
-    
-    hass.data[DOMAIN][config_entry.entry_id]["coordinator"] = coordinator
-    
+    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
     async_add_entities([CosaClimate(coordinator, config_entry)])
-
-
-class CosaCoordinator(DataUpdateCoordinator):
-    """COSA Koordinatör."""
-
-    def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry, entry_data: dict) -> None:
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=SCAN_INTERVAL)
-        
-        self.config_entry = config_entry
-        self._email = entry_data["email"]
-        self._password = entry_data["password"]
-        self._token = entry_data["token"]
-        self._endpoint_id = entry_data["endpoint_id"]
-        self._device_name = entry_data.get("device_name", "COSA Termostat")
-        self._place_id = entry_data.get("place_id")
-        
-        self._api = CosaAPI(async_get_clientsession(hass))
-
-    async def _async_update_data(self) -> dict[str, Any]:
-        try:
-            detail = await self._api.get_endpoint_detail(self._endpoint_id, self._token)
-            
-            # Hava durumu
-            forecast = {}
-            if self._place_id:
-                forecast = await self._api.get_forecast(self._place_id, self._token)
-            
-            return {
-                "endpoint": detail,
-                "forecast": forecast,
-            }
-            
-        except CosaAuthError:
-            login_result = await self._api.login(self._email, self._password)
-            if login_result.get("ok"):
-                self._token = login_result.get("token")
-                detail = await self._api.get_endpoint_detail(self._endpoint_id, self._token)
-                return {"endpoint": detail, "forecast": {}}
-            raise UpdateFailed("Giriş başarısız")
-            
-        except CosaAPIError as err:
-            raise UpdateFailed(f"API hatası: {err}") from err
-
-    async def async_set_mode(self, mode: str, option: str | None = None) -> None:
-        try:
-            await self._api.set_mode(self._endpoint_id, mode, option, self._token)
-            await self.async_request_refresh()
-        except CosaAuthError:
-            login_result = await self._api.login(self._email, self._password)
-            if login_result.get("ok"):
-                self._token = login_result.get("token")
-                await self._api.set_mode(self._endpoint_id, mode, option, self._token)
-                await self.async_request_refresh()
-
-    async def async_set_temperatures(self, home: float, away: float, sleep: float, custom: float) -> None:
-        try:
-            await self._api.set_target_temperatures(self._endpoint_id, home, away, sleep, custom, self._token)
-            await self.async_request_refresh()
-        except CosaAuthError:
-            login_result = await self._api.login(self._email, self._password)
-            if login_result.get("ok"):
-                self._token = login_result.get("token")
-                await self._api.set_target_temperatures(self._endpoint_id, home, away, sleep, custom, self._token)
-                await self.async_request_refresh()
 
 
 class CosaClimate(CoordinatorEntity, ClimateEntity):
@@ -132,12 +56,12 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
     _attr_max_temp = MAX_TEMP
     _attr_target_temperature_step = TEMP_STEP
 
-    def __init__(self, coordinator: CosaCoordinator, config_entry: ConfigEntry) -> None:
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_climate"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, config_entry.entry_id)},
-            name=coordinator._device_name,
+            name=coordinator.device_name,
             manufacturer="COSA",
             model="Smart Thermostat",
         )

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -34,11 +33,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Sensor platformunu kur."""
-    entry_data = hass.data[DOMAIN][config_entry.entry_id]
-    coordinator = entry_data.get("coordinator")
-    
-    if not coordinator:
-        return
+    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
     
     entities = [
         CosaTemperatureSensor(coordinator, config_entry),
@@ -137,15 +132,14 @@ class CosaTargetTemperatureSensor(CosaBaseSensor):
 
 
 class CosaBatteryVoltageSensor(CosaBaseSensor):
-    """Batarya Voltajı Sensörü."""
+    """Pil Voltajı Sensörü."""
 
     _attr_device_class = SensorDeviceClass.VOLTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
-    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator, config_entry, "battery_voltage", "Batarya Voltajı")
+        super().__init__(coordinator, config_entry, "battery_voltage", "Pil Voltajı")
 
     @property
     def native_value(self) -> float | None:
@@ -153,23 +147,23 @@ class CosaBatteryVoltageSensor(CosaBaseSensor):
 
 
 class CosaBatteryPercentSensor(CosaBaseSensor):
-    """Batarya Yüzdesi Sensörü."""
+    """Pil Yüzdesi Sensörü."""
 
     _attr_device_class = SensorDeviceClass.BATTERY
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = PERCENTAGE
 
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator, config_entry, "battery_percent", "Batarya")
+        super().__init__(coordinator, config_entry, "battery_percent", "Pil Seviyesi")
 
     @property
     def native_value(self) -> int | None:
-        power_state = self._endpoint.get("powerState")
-        return BATTERY_LEVELS.get(power_state)
+        power_state = self._endpoint.get("powerState", "")
+        return BATTERY_LEVELS.get(power_state, 0)
 
 
 class CosaRssiSensor(CosaBaseSensor):
-    """WiFi Sinyal Gücü Sensörü."""
+    """Sinyal Gücü Sensörü."""
 
     _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -177,7 +171,7 @@ class CosaRssiSensor(CosaBaseSensor):
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator, config_entry, "rssi", "WiFi Sinyal Gücü")
+        super().__init__(coordinator, config_entry, "rssi", "Sinyal Gücü")
 
     @property
     def native_value(self) -> int | None:
@@ -187,61 +181,70 @@ class CosaRssiSensor(CosaBaseSensor):
 class CosaCombiStateSensor(CosaBaseSensor):
     """Kombi Durumu Sensörü."""
 
+    _attr_icon = "mdi:fire"
+
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
         super().__init__(coordinator, config_entry, "combi_state", "Kombi Durumu")
-        self._attr_icon = "mdi:fire"
 
     @property
     def native_value(self) -> str | None:
         state = self._endpoint.get("combiState")
         if state == "on":
-            return "Çalışıyor"
-        return "Beklemede"
+            return "Açık"
+        elif state == "off":
+            return "Kapalı"
+        return state
 
 
 class CosaModeSensor(CosaBaseSensor):
     """Mod Sensörü."""
 
+    _attr_icon = "mdi:thermostat"
+
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
         super().__init__(coordinator, config_entry, "mode", "Mod")
-        self._attr_icon = "mdi:thermostat"
 
     @property
     def native_value(self) -> str | None:
         mode = self._endpoint.get("mode")
-        modes = {"manual": "Manuel", "auto": "Otomatik", "schedule": "Program"}
-        return modes.get(mode, mode)
+        mode_names = {
+            "manual": "Manuel",
+            "auto": "Otomatik",
+            "schedule": "Program",
+        }
+        return mode_names.get(mode, mode)
 
 
 class CosaOptionSensor(CosaBaseSensor):
-    """Option Sensörü."""
+    """Seçenek Sensörü."""
+
+    _attr_icon = "mdi:home-thermometer"
 
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
         super().__init__(coordinator, config_entry, "option", "Seçenek")
-        self._attr_icon = "mdi:home-thermometer"
 
     @property
     def native_value(self) -> str | None:
         option = self._endpoint.get("option")
-        options = {
+        option_names = {
             "home": "Evde",
             "away": "Dışarıda",
             "sleep": "Uyku",
             "custom": "Özel",
-            "frozen": "Kapalı",
+            "frozen": "Donma Koruma",
         }
-        return options.get(option, option)
+        return option_names.get(option, option)
 
 
 class CosaOutdoorTemperatureSensor(CosaBaseSensor):
-    """Dış Mekan Sıcaklık Sensörü."""
+    """Dış Sıcaklık Sensörü."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator, config_entry, "outdoor_temperature", "Dış Mekan Sıcaklığı")
+        super().__init__(coordinator, config_entry, "outdoor_temperature", "Dış Sıcaklık")
 
     @property
     def native_value(self) -> float | None:
@@ -252,61 +255,49 @@ class CosaOutdoorTemperatureSensor(CosaBaseSensor):
 
 
 class CosaOutdoorHumiditySensor(CosaBaseSensor):
-    """Dış Mekan Nem Sensörü."""
+    """Dış Nem Sensörü."""
 
     _attr_device_class = SensorDeviceClass.HUMIDITY
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = PERCENTAGE
 
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator, config_entry, "outdoor_humidity", "Dış Mekan Nemi")
+        super().__init__(coordinator, config_entry, "outdoor_humidity", "Dış Nem")
 
     @property
     def native_value(self) -> float | None:
         hourly = self._forecast.get("hourly", [])
         if hourly:
-            humidity = hourly[0].get("humidity")
-            if humidity:
-                return int(humidity * 100)
+            return hourly[0].get("humidity")
         return None
 
 
 class CosaWeatherSensor(CosaBaseSensor):
     """Hava Durumu Sensörü."""
 
+    _attr_icon = "mdi:weather-partly-cloudy"
+
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
         super().__init__(coordinator, config_entry, "weather", "Hava Durumu")
-        self._attr_icon = "mdi:weather-partly-cloudy"
 
     @property
     def native_value(self) -> str | None:
         hourly = self._forecast.get("hourly", [])
         if hourly:
             icon = hourly[0].get("icon", "")
-            icons = {
-                "clear-day": "Güneşli",
-                "clear-night": "Açık",
-                "partly-cloudy-day": "Parçalı Bulutlu",
-                "partly-cloudy-night": "Parçalı Bulutlu",
-                "cloudy": "Bulutlu",
-                "rain": "Yağmurlu",
-                "snow": "Karlı",
-                "wind": "Rüzgarlı",
-                "fog": "Sisli",
-            }
-            return icons.get(icon, icon)
+            return WEATHER_ICONS.get(icon, icon)
         return None
 
 
 class CosaHomeTemperatureSensor(CosaBaseSensor):
-    """Evde Modu Sıcaklık Sensörü."""
+    """Evde Sıcaklığı Sensörü."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator, config_entry, "home_temp", "Evde Sıcaklığı")
+        super().__init__(coordinator, config_entry, "home_temperature", "Evde Sıcaklığı")
 
     @property
     def native_value(self) -> float | None:
@@ -314,14 +305,14 @@ class CosaHomeTemperatureSensor(CosaBaseSensor):
 
 
 class CosaAwayTemperatureSensor(CosaBaseSensor):
-    """Dışarıda Modu Sıcaklık Sensörü."""
+    """Dışarıda Sıcaklığı Sensörü."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator, config_entry, "away_temp", "Dışarıda Sıcaklığı")
+        super().__init__(coordinator, config_entry, "away_temperature", "Dışarıda Sıcaklığı")
 
     @property
     def native_value(self) -> float | None:
@@ -329,14 +320,14 @@ class CosaAwayTemperatureSensor(CosaBaseSensor):
 
 
 class CosaSleepTemperatureSensor(CosaBaseSensor):
-    """Uyku Modu Sıcaklık Sensörü."""
+    """Uyku Sıcaklığı Sensörü."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator, config_entry, "sleep_temp", "Uyku Sıcaklığı")
+        super().__init__(coordinator, config_entry, "sleep_temperature", "Uyku Sıcaklığı")
 
     @property
     def native_value(self) -> float | None:
@@ -344,14 +335,14 @@ class CosaSleepTemperatureSensor(CosaBaseSensor):
 
 
 class CosaCustomTemperatureSensor(CosaBaseSensor):
-    """Özel Mod Sıcaklık Sensörü."""
+    """Özel Sıcaklık Sensörü."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator, config_entry, "custom_temp", "Özel Sıcaklık")
+        super().__init__(coordinator, config_entry, "custom_temperature", "Özel Sıcaklık")
 
     @property
     def native_value(self) -> float | None:
@@ -359,13 +350,13 @@ class CosaCustomTemperatureSensor(CosaBaseSensor):
 
 
 class CosaFirmwareVersionSensor(CosaBaseSensor):
-    """Firmware Versiyon Sensörü."""
+    """Firmware Versiyonu Sensörü."""
 
+    _attr_icon = "mdi:chip"
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
         super().__init__(coordinator, config_entry, "firmware", "Firmware Versiyonu")
-        self._attr_icon = "mdi:chip"
 
     @property
     def native_value(self) -> str | None:
