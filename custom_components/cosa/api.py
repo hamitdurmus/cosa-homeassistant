@@ -155,12 +155,9 @@ class CosaAPI:
                 if data.get("ok") == 0:
                     return {}
                 
-                
-                # API yanıtı: {"report": {"data": [...], "stats": {...}, "summary": {...}}, "ok": 1}
-                report = data.get("report", {})
-                _LOGGER.debug("Rapor verisi alındı - stats: %s, summary: %s", 
-                    bool(report.get("stats")), bool(report.get("summary")))
-                return report
+                # Forecast API yanıtı: {"place": ..., "currently": {...}, "hourly": [...], "daily": [...], "ok": 1}
+                _LOGGER.debug("Forecast verisi alındı - hourly: %s", bool(data.get("hourly")))
+                return data
                 
         except aiohttp.ClientError:
             return {}
