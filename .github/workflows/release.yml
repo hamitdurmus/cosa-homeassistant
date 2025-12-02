@@ -9,20 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Get version from tag
-        id: version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Update manifest version
+      - name: Create release zip
         run: |
-          sed -i 's/"version": "[^"]*"/"version": "${{ steps.version.outputs.version }}"/' custom_components/cosa/manifest.json
-
-      - name: Create release archive
-        run: |
-          cd custom_components
-          zip -r ../cosa.zip cosa
-
+          cd custom_components/cosa
+          zip -r ../../cosa.zip .
       - name: Upload release asset
         uses: actions/upload-release-asset@v1
         env:
