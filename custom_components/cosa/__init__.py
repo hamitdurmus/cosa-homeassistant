@@ -45,11 +45,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             endpoint = await api.get_endpoint_detail(endpoint_id, token)
             
             forecast = {}
+            reports = {}
             place_id = endpoint.get("place")
             if place_id:
                 forecast = await api.get_forecast(place_id, token)
             
-            return {"endpoint": endpoint, "forecast": forecast}
+            # Rapor verilerini al
+            reports = await api.get_reports(endpoint_id, token)
+            
+            return {"endpoint": endpoint, "forecast": forecast, "reports": reports}
             
         except CosaAPIError as err:
             raise UpdateFailed(f"API hatası: {err}") from err

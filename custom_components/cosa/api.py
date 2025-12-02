@@ -277,3 +277,27 @@ class CosaAPI:
         except aiohttp.ClientError as err:
             _LOGGER.error("set_device_settings error: %s", err)
             return False
+
+    async def get_reports(self, endpoint_id: str, token: Optional[str] = None) -> dict[str, Any]:
+        """Rapor verilerini al (son 24 saat)."""
+        from .const import ENDPOINT_GET_REPORTS
+        session = await self._get_session()
+        url = f"{API_BASE_URL}{ENDPOINT_GET_REPORTS}"
+        payload = {"endpoint": endpoint_id}
+        
+        try:
+            async with session.post(
+                url, json=payload, headers=self._get_auth_headers(token),
+                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
+            ) as response:
+                data = await response.json()
+                
+                if data.get("ok") == 0:
+                    _LOGGER.warning("Rapor verisi alınamadı")
+                    return {}
+                
+                return data
+                
+        except aiohttp.ClientError as err:
+            _LOGGER.warning("Rapor verisi alınamadı: %s", err)
+            return {}

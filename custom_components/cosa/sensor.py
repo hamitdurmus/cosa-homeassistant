@@ -49,6 +49,17 @@ async def async_setup_entry(
         CosaOutdoorHumiditySensor(coordinator, config_entry),
         CosaWeatherSensor(coordinator, config_entry),
         CosaFirmwareVersionSensor(coordinator, config_entry),
+        # Rapor Sensörleri
+        CosaTotalRuntimeSensor(coordinator, config_entry),
+        CosaHomeRuntimeSensor(coordinator, config_entry),
+        CosaSleepRuntimeSensor(coordinator, config_entry),
+        CosaAverageTemperatureSensor(coordinator, config_entry),
+        CosaMaxTemperatureSensor(coordinator, config_entry),
+        CosaMinTemperatureSensor(coordinator, config_entry),
+        CosaMaxHumiditySensor(coordinator, config_entry),
+        CosaMinHumiditySensor(coordinator, config_entry),
+        CosaOutdoorAverageTemperatureSensor(coordinator, config_entry),
+        CosaNetworkQualitySensor(coordinator, config_entry),
     ]
     
     async_add_entities(entities)
@@ -310,3 +321,220 @@ class CosaFirmwareVersionSensor(CosaBaseSensor):
     def native_value(self) -> str | None:
         device = self._endpoint.get("device", {})
         return device.get("version")
+
+
+# ===== RAPOR SENSÖRLERİ =====
+
+class CosaReportBaseSensor(CosaBaseSensor):
+    """COSA Rapor Base Sensor."""
+
+    @property
+    def _reports(self) -> dict:
+        if self.coordinator.data:
+            return self.coordinator.data.get("reports", {})
+        return {}
+
+    @property
+    def _stats(self) -> dict:
+        return self._reports.get("stats", {})
+
+    @property
+    def _summary(self) -> dict:
+        return self._reports.get("summary", {})
+
+
+class CosaTotalRuntimeSensor(CosaReportBaseSensor):
+    """Toplam Çalışma Süresi Sensörü (Son 24 Saat)."""
+
+    _attr_icon = "mdi:clock-outline"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "h"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "total_runtime", "Toplam Çalışma Süresi (24s)")
+
+    @property
+    def native_value(self) -> float | None:
+        runtimes = self._summary.get("runtimes", {})
+        total_seconds = runtimes.get("total", 0)
+        return round(total_seconds / 3600, 2) if total_seconds else 0
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        runtimes = self._summary.get("runtimes", {})
+        return {
+            "evde_saat": round(runtimes.get("home", 0) / 3600, 2),
+            "uyku_saat": round(runtimes.get("sleep", 0) / 3600, 2),
+            "disari_saat": round(runtimes.get("away", 0) / 3600, 2),
+            "manuel_saat": round(runtimes.get("custom", 0) / 3600, 2),
+            "donma_koruma_saat": round(runtimes.get("frozen", 0) / 3600, 2),
+            "toplam_saniye": runtimes.get("total", 0),
+        }
+
+
+class CosaHomeRuntimeSensor(CosaReportBaseSensor):
+    """Evde Modu Çalışma Süresi (Son 24 Saat)."""
+
+    _attr_icon = "mdi:home-clock"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "h"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "home_runtime", "Evde Çalışma Süresi (24s)")
+
+    @property
+    def native_value(self) -> float | None:
+        runtimes = self._summary.get("runtimes", {})
+        seconds = runtimes.get("home", 0)
+        return round(seconds / 3600, 2) if seconds else 0
+
+
+class CosaSleepRuntimeSensor(CosaReportBaseSensor):
+    """Uyku Modu Çalışma Süresi (Son 24 Saat)."""
+
+    _attr_icon = "mdi:bed-clock"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "h"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "sleep_runtime", "Uyku Çalışma Süresi (24s)")
+
+    @property
+    def native_value(self) -> float | None:
+        runtimes = self._summary.get("runtimes", {})
+        seconds = runtimes.get("sleep", 0)
+        return round(seconds / 3600, 2) if seconds else 0
+
+
+class CosaAverageTemperatureSensor(CosaReportBaseSensor):
+    """Ortalama Sıcaklık Sensörü (Son 24 Saat)."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_icon = "mdi:thermometer-lines"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "avg_temperature", "Ortalama Sıcaklık (24s)")
+
+    @property
+    def native_value(self) -> float | None:
+        avg_temps = self._summary.get("averageTemperatures", {})
+        return avg_temps.get("total")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        avg_temps = self._summary.get("averageTemperatures", {})
+        return {
+            "evde_ortalama": avg_temps.get("home"),
+            "uyku_ortalama": avg_temps.get("sleep"),
+            "disari_ortalama": avg_temps.get("away"),
+            "manuel_ortalama": avg_temps.get("custom"),
+        }
+
+
+class CosaMaxTemperatureSensor(CosaReportBaseSensor):
+    """Maksimum Sıcaklık Sensörü (Son 24 Saat)."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "max_temperature", "Maksimum Sıcaklık (24s)")
+
+    @property
+    def native_value(self) -> float | None:
+        return self._stats.get("maxTemperature")
+
+
+class CosaMinTemperatureSensor(CosaReportBaseSensor):
+    """Minimum Sıcaklık Sensörü (Son 24 Saat)."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "min_temperature", "Minimum Sıcaklık (24s)")
+
+    @property
+    def native_value(self) -> float | None:
+        return self._stats.get("minTemperature")
+
+
+class CosaMaxHumiditySensor(CosaReportBaseSensor):
+    """Maksimum Nem Sensörü (Son 24 Saat)."""
+
+    _attr_device_class = SensorDeviceClass.HUMIDITY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "max_humidity", "Maksimum Nem (24s)")
+
+    @property
+    def native_value(self) -> float | None:
+        return self._stats.get("maxHumidity")
+
+
+class CosaMinHumiditySensor(CosaReportBaseSensor):
+    """Minimum Nem Sensörü (Son 24 Saat)."""
+
+    _attr_device_class = SensorDeviceClass.HUMIDITY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "min_humidity", "Minimum Nem (24s)")
+
+    @property
+    def native_value(self) -> float | None:
+        return self._stats.get("minHumidity")
+
+
+class CosaOutdoorAverageTemperatureSensor(CosaReportBaseSensor):
+    """Dış Ortam Ortalama Sıcaklık (Son 24 Saat)."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_icon = "mdi:home-thermometer-outline"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "outdoor_avg_temp", "Dış Ortalama Sıcaklık (24s)")
+
+    @property
+    def native_value(self) -> float | None:
+        avg = self._stats.get("placeAverageTemperature")
+        return round(avg, 1) if avg else None
+
+
+class CosaNetworkQualitySensor(CosaReportBaseSensor):
+    """Ağ Kalitesi Sensörü."""
+
+    _attr_icon = "mdi:wifi"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "network_quality", "Ağ Kalitesi")
+
+    @property
+    def native_value(self) -> str | None:
+        quality = self._stats.get("networkQuality")
+        if quality is None:
+            return None
+        quality_names = {
+            0: "Çok Zayıf",
+            1: "Zayıf", 
+            2: "Orta",
+            3: "İyi",
+            4: "Çok İyi",
+        }
+        return quality_names.get(quality, f"Seviye {quality}")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "quality_level": self._stats.get("networkQuality"),
+            "offline_seconds": self._stats.get("offlineFor", 0),
+        }

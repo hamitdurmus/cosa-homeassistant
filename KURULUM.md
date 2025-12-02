@@ -1,169 +1,230 @@
-# COSA Home Assistant Entegrasyonu - Kurulum Kılavuzu
+# COSA Smart Thermostat - Home Assistant Entegrasyonu
 
-## 🏠 Genel Bakış
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![GitHub release](https://img.shields.io/github/v/release/ahamitd/cosa-homeassistant)](https://github.com/ahamitd/cosa-homeassistant/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-COSA Smart Thermostat entegrasyonu, COSA termostatınızı Home Assistant üzerinden kontrol etmenizi sağlar.
+<p align="center">
+  <img src="custom_components/cosa/icon.png" alt="COSA Logo" width="128">
+</p>
 
-### Özellikler
+COSA akıllı termostatınızı Home Assistant üzerinden tam kontrol edin! Bu entegrasyon, COSA mobil uygulamasındaki tüm özellikleri Home Assistant'a taşır.
 
-- 🌡️ **Termostat Kontrolü:** Sıcaklık ayarlama, mod değiştirme
-- 📊 **18 Sensör:** Sıcaklık, nem, pil durumu, dış hava ve daha fazlası
-- 🔒 **Çocuk Kilidi:** Açma/kapama kontrolü
-- 🏠 **6 Preset Modu:** Evde, Uyku, Dışarı, Manuel, Otomatik, Haftalık
-- 🔥 **Anlık Durum:** Kombi ısıtma durumu gösterimi
-- 🌤️ **Hava Durumu:** Dış sıcaklık ve nem bilgisi
+---
 
-## 📋 Gereksinimler
+## ✨ Özellikler
 
-- Home Assistant 2024.1 veya üzeri
-- COSA mobil uygulamasında aktif hesap
-- İnternet bağlantısı
+### 🌡️ Termostat Kontrolü
+- Sıcaklık ayarlama (0.1°C hassasiyet)
+- Anlık sıcaklık ve nem gösterimi
+- Kombi açık/kapalı durumu
 
-## �� Kurulum
+### 🏠 6 Preset Modu
+| Mod | İkon | Açıklama |
+|-----|------|----------|
+| Evde | 🏠 | Ev modu sıcaklığı |
+| Uyku | 🛏️ | Gece/uyku modu |
+| Dışarı | 🚶 | Dışarıda modu |
+| Manuel | ⚙️ | Manuel sıcaklık ayarı |
+| Otomatik | 🤖 | Otomatik mod |
+| Haftalık | 📅 | Haftalık program |
+
+### 📊 Sensörler (18 adet)
+- Oda sıcaklığı ve nem
+- Dış hava sıcaklığı ve nem
+- Hava durumu (Türkçe: Güneşli, Bulutlu, Yağmurlu vb.)
+- Pil seviyesi ve voltajı
+- Sinyal gücü (RSSI)
+- Kombi durumu
+- Firmware versiyonu
+- Ve daha fazlası...
+
+### 🔒 Ek Özellikler
+- Çocuk kilidi açma/kapama
+- Açık pencere algılama
+- Bağlantı durumu izleme
+- 10 saniyede bir otomatik güncelleme
+
+---
+
+## 📦 Kurulum
 
 ### Yöntem 1: HACS ile Kurulum (Önerilen)
 
-1. HACS > Entegrasyonlar'a gidin
-2. Sağ üst köşedeki **⋮** menüsüne tıklayın
-3. **Özel depolar** seçin
-4. Depo URL'si: `https://github.com/ahamitd/cosa-homeassistant`
-5. Kategori: **Entegrasyon** seçin
-6. **Ekle** butonuna tıklayın
-7. COSA Smart Thermostat'ı bulun ve kurun
-8. Home Assistant'ı yeniden başlatın
+1. **HACS'ı açın** → Entegrasyonlar sekmesine gidin
+
+2. **Özel depo ekleyin:**
+   - Sağ üst köşedeki **⋮** (üç nokta) menüsüne tıklayın
+   - **"Özel depolar"** seçin
+   - Depo URL'si: `https://github.com/ahamitd/cosa-homeassistant`
+   - Kategori: **Entegrasyon** seçin
+   - **Ekle** butonuna tıklayın
+
+3. **Entegrasyonu kurun:**
+   - HACS'ta **"COSA Smart Thermostat"** arayın
+   - **İndir** butonuna tıklayın
+   - İndirme tamamlandığında **Home Assistant'ı yeniden başlatın**
+
+4. **Entegrasyonu ekleyin:**
+   - **Ayarlar** → **Cihazlar ve Hizmetler** → **+ Entegrasyon Ekle**
+   - **"COSA"** arayın ve seçin
+   - COSA hesap bilgilerinizi girin
 
 ### Yöntem 2: Manuel Kurulum
 
-1. Bu depoyu indirin veya klonlayın
-2. `custom_components/cosa` klasörünü Home Assistant'ın `config/custom_components/` klasörüne kopyalayın
+1. Bu depoyu indirin veya klonlayın:
+   ```bash
+   git clone https://github.com/ahamitd/cosa-homeassistant.git
+   ```
+
+2. `custom_components/cosa` klasörünü Home Assistant'ın `config/custom_components/` dizinine kopyalayın:
+   ```
+   config/
+   └── custom_components/
+       └── cosa/
+           ├── __init__.py
+           ├── api.py
+           ├── binary_sensor.py
+           ├── climate.py
+           ├── config_flow.py
+           ├── const.py
+           ├── manifest.json
+           ├── sensor.py
+           ├── strings.json
+           └── switch.py
+   ```
+
 3. Home Assistant'ı yeniden başlatın
 
-```
-config/
-└── custom_components/
-    └── cosa/
-        ├── __init__.py
-        ├── api.py
-        ├── binary_sensor.py
-        ├── climate.py
-        ├── config_flow.py
-        ├── const.py
-        ├── manifest.json
-        ├── sensor.py
-        ├── strings.json
-        ├── switch.py
-        └── icons/
-            └── icon.png
-```
+4. **Ayarlar** → **Cihazlar ve Hizmetler** → **+ Entegrasyon Ekle** → "COSA" arayın
 
-## ⚙️ Entegrasyonu Ekleme
+---
 
-1. **Ayarlar** > **Cihazlar ve Hizmetler**'e gidin
-2. **+ Entegrasyon Ekle** butonuna tıklayın
-3. **"COSA"** yazarak arayın
-4. **COSA Smart Thermostat** seçin
-5. COSA hesap bilgilerinizi girin:
-   - **E-posta:** COSA uygulamasındaki e-posta adresiniz
-   - **Şifre:** COSA uygulamasındaki şifreniz
-6. Cihazınızı seçin (birden fazla varsa)
+## ⚙️ Yapılandırma
 
-## 🎛️ Kullanım
+### Giriş Bilgileri
 
-### Termostat Kartı
+Entegrasyonu eklerken COSA mobil uygulamasında kullandığınız bilgileri girin:
 
-Entegrasyon kurulduktan sonra termostat kartında şunları göreceksiniz:
+| Alan | Açıklama |
+|------|----------|
+| **E-posta** | COSA hesabınızın e-posta adresi |
+| **Şifre** | COSA hesabınızın şifresi |
 
-| Özellik | Açıklama |
-|---------|----------|
-| 🌡️ Mevcut Sıcaklık | Oda sıcaklığı |
-| 💧 Nem | Oda nem oranı |
-| 🎯 Hedef Sıcaklık | Ayarlanan sıcaklık (0.1°C hassasiyet) |
-| 🔥 Isıtma Durumu | Kombi aktif/pasif |
+### Cihaz Seçimi
 
-### Preset Modları
+Hesabınızda birden fazla cihaz varsa, kontrol etmek istediğiniz cihazı seçmeniz istenecektir.
 
-| Mod | İkon | Açıklama |
-|-----|------|----------|
-| 🏠 Evde | `mdi:home` | Ev modu |
-| 🛏️ Uyku | `mdi:bed` | Gece/uyku modu |
-| 🚶 Dışarı | `mdi:walk` | Dışarıda modu |
-| ⚙️ Manuel | `mdi:tune` | Manuel ayar |
-| 🤖 Otomatik | `mdi:thermostat-auto` | Otomatik mod |
-| 📅 Haftalık | `mdi:calendar-clock` | Haftalık program |
+---
 
-### Entity'ler
+## 🎛️ Entity'ler
 
-#### Climate (1 adet)
-- `climate.evim` - Ana termostat kontrolü
+### Climate (1 adet)
+Ana termostat kontrolü - sıcaklık ayarlama, mod değiştirme, açma/kapama
 
-#### Sensörler (18 adet)
-| Entity | Açıklama |
+### Sensörler (18 adet)
+
+| Sensör | Açıklama | Birim |
+|--------|----------|-------|
+| Oda Sıcaklığı | Mevcut oda sıcaklığı | °C |
+| Nem | Oda nem oranı | % |
+| Hedef Sıcaklık | Ayarlanan hedef sıcaklık | °C |
+| Pil Voltajı | Termostat pil voltajı | V |
+| Pil Seviyesi | Pil yüzdesi | % |
+| Sinyal Gücü | WiFi sinyal gücü | dBm |
+| Kombi Durumu | Açık/Kapalı | - |
+| Mod | Manuel/Otomatik/Haftalık | - |
+| Seçenek | Evde/Uyku/Dışarı/Manuel | - |
+| Dış Sıcaklık | Hava durumu sıcaklığı | °C |
+| Dış Nem | Hava durumu nemi | % |
+| Hava Durumu | Güneşli/Bulutlu/Yağmurlu vb. | - |
+| Evde Sıcaklığı | Ev modu hedef sıcaklığı | °C |
+| Dışarı Sıcaklığı | Dışarı modu hedef sıcaklığı | °C |
+| Uyku Sıcaklığı | Uyku modu hedef sıcaklığı | °C |
+| Manuel Sıcaklık | Manuel mod hedef sıcaklığı | °C |
+| Firmware | Cihaz yazılım versiyonu | - |
+| Kalibrasyon | Sıcaklık kalibrasyonu | °C |
+
+### Binary Sensörler (4 adet)
+
+| Sensör | Açıklama |
 |--------|----------|
-| Oda Sıcaklığı | Mevcut oda sıcaklığı |
-| Nem | Oda nem oranı |
-| Hedef Sıcaklık | Ayarlanan hedef |
-| Pil Voltajı | Termostat pil voltajı |
-| Pil Seviyesi | Pil yüzdesi |
-| Sinyal Gücü | WiFi sinyal gücü |
-| Kombi Durumu | Açık/Kapalı |
-| Mod | Aktif mod |
-| Seçenek | Aktif preset |
-| Dış Sıcaklık | Hava durumu sıcaklığı |
-| Dış Nem | Hava durumu nemi |
-| Hava Durumu | Hava durumu ikonu |
-| Evde Sıcaklığı | Ev modu sıcaklığı |
-| Dışarıda Sıcaklığı | Dışarı modu sıcaklığı |
-| Uyku Sıcaklığı | Uyku modu sıcaklığı |
-| Özel Sıcaklık | Manuel mod sıcaklığı |
-| Firmware | Cihaz yazılım versiyonu |
-| Kalibrasyon | Sıcaklık kalibrasyonu |
+| Bağlantı | Cihaz çevrimiçi mi? |
+| Isıtma | Kombi şu an ısıtıyor mu? |
+| Açık Pencere | Pencere açık algılandı mı? |
+| Çocuk Kilidi | Kilit aktif mi? |
 
-#### Binary Sensörler (4 adet)
-| Entity | Açıklama |
-|--------|----------|
-| Bağlantı | Cihaz bağlantı durumu |
-| Isıtma | Kombi aktif mi? |
-| Açık Pencere | Pencere açık algılama |
-| Çocuk Kilidi Durumu | Kilit durumu |
+### Switch (1 adet)
 
-#### Switch (1 adet)
-| Entity | Açıklama |
+| Switch | Açıklama |
 |--------|----------|
 | Çocuk Kilidi | Çocuk kilidini aç/kapat |
+
+---
 
 ## 🔧 Sorun Giderme
 
 ### "Bağlantı Kurulamadı" Hatası
-
 - İnternet bağlantınızı kontrol edin
-- COSA API'sinin erişilebilir olduğunu doğrulayın
-- Firewall/VPN ayarlarını kontrol edin
+- COSA uygulamasında giriş yapabildiğinizi doğrulayın
+- VPN veya firewall ayarlarını kontrol edin
 
 ### "Geçersiz Kimlik Doğrulama" Hatası
-
 - E-posta ve şifrenizin doğru olduğundan emin olun
 - COSA mobil uygulamasında giriş yapabildiğinizi test edin
-- Şifrenizde özel karakter varsa dikkatli girin
 
-### Sıcaklık Değişikliği Gecikmesi
-
-- Entegrasyon her 10 saniyede bir güncellenir
-- API isteği sırasında kısa gecikme normaldir
-
-### Ikon Görünmüyor
-
+### Sıcaklık Güncellenmiyor
 - Home Assistant'ı yeniden başlatın
+- Entegrasyonu silip yeniden ekleyin
+- Log dosyalarını kontrol edin
+
+### Logo/İkon Görünmüyor
 - Tarayıcı önbelleğini temizleyin (Ctrl+F5)
+- Home Assistant'ı yeniden başlatın
+
+### Güncelleme Aktif Olmadı
+- Entegrasyonu **silip yeniden ekleyin**
+- Veya Home Assistant'ı tamamen **yeniden başlatın**
+- HACS'tan güncelleme yaptıysanız mutlaka restart gerekli
+
+---
+
+### Güncelleme Aralığı
+Entegrasyon her **10 saniyede** bir COSA API'sinden veri çeker.
+
+---
 
 ## 📄 Lisans
 
-MIT License - Detaylar için [LICENSE](LICENSE) dosyasına bakın.
+Bu proje MIT Lisansı altında lisanslanmıştır. Detaylar için [LICENSE](LICENSE) dosyasına bakın.
 
-## 💬 Destek
+---
 
-- GitHub Issues: [https://github.com/ahamitd/cosa-homeassistant/issues](https://github.com/ahamitd/cosa-homeassistant/issues)
-- Telegram: [@ahamitd](https://t.me/ahamitd)
+## ⚠️ Telif Hakkı ve İletişim
+
+Bu entegrasyon **resmi olmayan** bir topluluk projesidir ve COSA/Nuvia tarafından desteklenmemektedir.
+
+**Telif, ticari kullanım veya sorularınız için:**
+- 📧 Telegram: [@ahamitd](https://t.me/ahamitd)
+- 🐛 GitHub Issues: [https://github.com/ahamitd/cosa-homeassistant/issues](https://github.com/ahamitd/cosa-homeassistant/issues)
+
+---
+
+## 🤝 Katkıda Bulunma
+
+Katkılarınızı bekliyoruz! Lütfen [CONTRIBUTING.md](CONTRIBUTING.md) dosyasını inceleyin.
+
+---
+
+## 🙏 Teşekkürler
+
+- [Telegram Akıllı Evler Topluluğu](https://t.me/+hvkiQg0YIERiY2Fk)'na
+- Home Assistant topluluğuna
+- HACS ekibine
+- Tüm katkıda bulunanlara
 
 ---
 
 **Geliştirici:** [@ahamitd](https://github.com/ahamitd)
+
+⭐ Bu projeyi beğendiyseniz yıldız vermeyi unutmayın!

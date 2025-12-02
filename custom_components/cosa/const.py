@@ -22,6 +22,7 @@ ENDPOINT_GET_FORECAST = "/api/places/getForecast"
 ENDPOINT_SET_SCHEDULE = "/api/endpoints/setSchedule"
 ENDPOINT_SET_COMBI_SETTINGS = "/api/endpoints/setCombiSettings"
 ENDPOINT_SET_DEVICE_SETTINGS = "/api/endpoints/setDeviceSettings"
+ENDPOINT_GET_REPORTS = "/api/endpoints/getReportsAnalyzed"
 
 # HTTP Header'ları
 HEADER_USER_AGENT = "Cosa/1 CFNetwork/3860.200.71 Darwin/25.1.0"
