@@ -1,0 +1,97 @@
+{
+  "entity": {
+    "climate": {
+      "cosa_thermostat": {
+        "default": "mdi:thermostat",
+        "state_attributes": {
+          "preset_mode": {
+            "default": "mdi:thermostat",
+            "state": {
+              "Evde": "mdi:home",
+              "Uyku": "mdi:bed",
+              "Dışarı": "mdi:walk",
+              "Manuel": "mdi:tune",
+              "Otomatik": "mdi:thermostat-auto",
+              "Haftalık": "mdi:calendar-clock"
+            }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "temperature": {
+        "default": "mdi:thermometer"
+      },
+      "humidity": {
+        "default": "mdi:water-percent"
+      },
+      "target_temperature": {
+        "default": "mdi:thermometer-check"
+      },
+      "battery_voltage": {
+        "default": "mdi:battery"
+      },
+      "battery_percent": {
+        "default": "mdi:battery"
+      },
+      "rssi": {
+        "default": "mdi:wifi"
+      },
+      "combi_state": {
+        "default": "mdi:fire"
+      },
+      "mode": {
+        "default": "mdi:thermostat"
+      },
+      "option": {
+        "default": "mdi:format-list-bulleted"
+      },
+      "outdoor_temperature": {
+        "default": "mdi:thermometer"
+      },
+      "outdoor_humidity": {
+        "default": "mdi:water-percent"
+      },
+      "weather": {
+        "default": "mdi:weather-partly-cloudy"
+      },
+      "home_temperature": {
+        "default": "mdi:home-thermometer"
+      },
+      "away_temperature": {
+        "default": "mdi:home-export-outline"
+      },
+      "sleep_temperature": {
+        "default": "mdi:bed"
+      },
+      "custom_temperature": {
+        "default": "mdi:tune"
+      },
+      "firmware": {
+        "default": "mdi:chip"
+      },
+      "calibration": {
+        "default": "mdi:scale-balance"
+      }
+    },
+    "binary_sensor": {
+      "connected": {
+        "default": "mdi:wifi"
+      },
+      "heating": {
+        "default": "mdi:fire"
+      },
+      "open_window": {
+        "default": "mdi:window-open-variant"
+      },
+      "child_lock_sensor": {
+        "default": "mdi:lock"
+      }
+    },
+    "switch": {
+      "child_lock": {
+        "default": "mdi:lock"
+      }
+    }
+  }
+}

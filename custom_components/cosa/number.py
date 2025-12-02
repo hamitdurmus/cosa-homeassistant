@@ -1,0 +1,198 @@
+"""COSA Number Platform."""
+
+from __future__ import annotations
+
+import logging
+
+from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfTemperature
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .const import (
+    DOMAIN,
+    CALIBRATION_MIN,
+    CALIBRATION_MAX,
+    CALIBRATION_STEP,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+TEMPERATURE_MIN = 5.0
+TEMPERATURE_MAX = 32.0
+TEMPERATURE_STEP = 0.5
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Number platformunu kur."""
+    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
+    
+    entities = [
+        CosaCalibrationNumber(coordinator, config_entry),
+        CosaHomeTemperatureNumber(coordinator, config_entry),
+        CosaAwayTemperatureNumber(coordinator, config_entry),
+        CosaSleepTemperatureNumber(coordinator, config_entry),
+        CosaCustomTemperatureNumber(coordinator, config_entry),
+    ]
+    
+    async_add_entities(entities)
+
+
+class CosaCalibrationNumber(CoordinatorEntity, NumberEntity):
+    """Sıcaklık Kalibrasyonu Number Entity."""
+
+    _attr_has_entity_name = True
+    _attr_native_min_value = CALIBRATION_MIN
+    _attr_native_max_value = CALIBRATION_MAX
+    _attr_native_step = CALIBRATION_STEP
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_mode = NumberMode.SLIDER
+    _attr_icon = "mdi:thermometer-check"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_calibration"
+        self._attr_name = "Sıcaklık Kalibrasyonu"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, config_entry.entry_id)},
+        )
+        self._optimistic_value: float | None = None
+
+    @property
+    def _endpoint(self) -> dict:
+        if self.coordinator.data:
+            return self.coordinator.data.get("endpoint", {})
+        return {}
+
+    @property
+    def native_value(self) -> float | None:
+        if self._optimistic_value is not None:
+            return self._optimistic_value
+        return self._endpoint.get("calibration", 0.0)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Coordinator güncellemesini işle."""
+        real_value = self._endpoint.get("calibration", 0.0)
+        if self._optimistic_value is not None and abs(real_value - self._optimistic_value) < 0.05:
+            self._optimistic_value = None
+        self.async_write_ha_state()
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Kalibrasyonu ayarla."""
+        self._optimistic_value = value
+        self.async_write_ha_state()
+        result = await self.coordinator.async_set_calibration(value)
+        if not result:
+            self._optimistic_value = None
+            self.async_write_ha_state()
+
+
+class CosaTemperatureNumberBase(CoordinatorEntity, NumberEntity):
+    """Base class for temperature number entities."""
+
+    _attr_has_entity_name = True
+    _attr_native_min_value = TEMPERATURE_MIN
+    _attr_native_max_value = TEMPERATURE_MAX
+    _attr_native_step = TEMPERATURE_STEP
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_mode = NumberMode.SLIDER
+    _temp_key: str = ""
+    _preset_name: str = ""
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._config_entry = config_entry
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, config_entry.entry_id)},
+        )
+        self._optimistic_value: float | None = None
+
+    @property
+    def _endpoint(self) -> dict:
+        if self.coordinator.data:
+            return self.coordinator.data.get("endpoint", {})
+        return {}
+
+    @property
+    def native_value(self) -> float | None:
+        if self._optimistic_value is not None:
+            return self._optimistic_value
+        return self._endpoint.get(self._temp_key)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Coordinator güncellemesini işle."""
+        real_value = self._endpoint.get(self._temp_key)
+        if self._optimistic_value is not None and real_value is not None:
+            if abs(real_value - self._optimistic_value) < 0.25:
+                self._optimistic_value = None
+        self.async_write_ha_state()
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Sıcaklığı ayarla."""
+        self._optimistic_value = value
+        self.async_write_ha_state()
+        result = await self.coordinator.async_set_preset_temperature(self._preset_name, value)
+        if not result:
+            self._optimistic_value = None
+            self.async_write_ha_state()
+
+
+class CosaHomeTemperatureNumber(CosaTemperatureNumberBase):
+    """Evdeyim Sıcaklığı Number Entity."""
+
+    _temp_key = "homeTemperature"
+    _preset_name = "home"
+    _attr_icon = "mdi:home-thermometer"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry)
+        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_home_temperature"
+        self._attr_name = "Evdeyim Sıcaklığı"
+
+
+class CosaAwayTemperatureNumber(CosaTemperatureNumberBase):
+    """Dışarıdayım Sıcaklığı Number Entity."""
+
+    _temp_key = "awayTemperature"
+    _preset_name = "away"
+    _attr_icon = "mdi:home-export-outline"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry)
+        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_away_temperature"
+        self._attr_name = "Dışarıdayım Sıcaklığı"
+
+
+class CosaSleepTemperatureNumber(CosaTemperatureNumberBase):
+    """Uyku Sıcaklığı Number Entity."""
+
+    _temp_key = "sleepTemperature"
+    _preset_name = "sleep"
+    _attr_icon = "mdi:bed"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry)
+        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_sleep_temperature"
+        self._attr_name = "Uyku Sıcaklığı"
+
+
+class CosaCustomTemperatureNumber(CosaTemperatureNumberBase):
+    """Özel Sıcaklık Number Entity."""
+
+    _temp_key = "customTemperature"
+    _preset_name = "custom"
+    _attr_icon = "mdi:thermometer-lines"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry)
+        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_custom_temperature"
+        self._attr_name = "Özel Sıcaklık"
