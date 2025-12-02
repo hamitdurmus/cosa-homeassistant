@@ -156,7 +156,9 @@ class CosaAPI:
                     return {}
                 
                 
-                _LOGGER.debug("Rapor verisi alındı: stats=%s, summary=%s", bool(data.get("stats")), bool(data.get("summary")))
+                _LOGGER.debug("Rapor verisi alındı - keys: %s", list(data.keys()) if data else "None")
+                _LOGGER.debug("Rapor verisi - stats keys: %s", list(data.get("stats", {}).keys()) if data.get("stats") else "None")
+                _LOGGER.debug("Rapor verisi - summary keys: %s", list(data.get("summary", {}).keys()) if data.get("summary") else "None")
                 return data
                 
         except aiohttp.ClientError:
@@ -299,7 +301,9 @@ class CosaAPI:
                     return {}
                 
                 
-                _LOGGER.debug("Rapor verisi alındı: stats=%s, summary=%s", bool(data.get("stats")), bool(data.get("summary")))
+                _LOGGER.debug("Rapor verisi alındı - keys: %s", list(data.keys()) if data else "None")
+                _LOGGER.debug("Rapor verisi - stats keys: %s", list(data.get("stats", {}).keys()) if data.get("stats") else "None")
+                _LOGGER.debug("Rapor verisi - summary keys: %s", list(data.get("summary", {}).keys()) if data.get("summary") else "None")
                 return data
                 
         except aiohttp.ClientError as err:
