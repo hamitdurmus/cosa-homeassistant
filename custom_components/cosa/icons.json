@@ -7,12 +7,12 @@
           "preset_mode": {
             "default": "mdi:thermostat",
             "state": {
-              "Evde": "mdi:home",
-              "Uyku": "mdi:bed",
-              "Dışarı": "mdi:walk",
-              "Manuel": "mdi:tune",
-              "Otomatik": "mdi:thermostat-auto",
-              "Haftalık": "mdi:calendar-clock"
+              "home": "mdi:home",
+              "sleep": "mdi:bed",
+              "away": "mdi:walk",
+              "custom": "mdi:tune",
+              "auto": "mdi:thermostat-auto",
+              "schedule": "mdi:calendar-clock"
             }
           }
         }

@@ -34,12 +34,12 @@
         "state_attributes": {
           "preset_mode": {
             "state": {
-              "Evde": "Evde",
-              "Uyku": "Uyku",
-              "Dışarı": "Dışarı",
-              "Manuel": "Manuel",
-              "Otomatik": "Otomatik",
-              "Haftalık": "Haftalık"
+              "home": "Evde",
+              "sleep": "Uyku",
+              "away": "Dışarı",
+              "custom": "Manuel",
+              "auto": "Otomatik",
+              "schedule": "Haftalık"
             }
           }
         }
