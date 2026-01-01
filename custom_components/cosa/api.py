@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Optional
 
@@ -16,7 +17,6 @@ from .const import (
     ENDPOINT_SET_MODE,
     ENDPOINT_SET_TARGET_TEMPERATURES,
     ENDPOINT_GET_FORECAST,
-    ENDPOINT_SET_COMBI_SETTINGS,
     ENDPOINT_SET_DEVICE_SETTINGS,
     HEADER_USER_AGENT,
     HEADER_CONTENT_TYPE,
@@ -201,36 +201,53 @@ class CosaAPI:
             }
         }
         
+        _LOGGER.debug("set_target_temperatures payload: %s", payload)
+        
         try:
             async with session.post(
                 url, json=payload, headers=self._get_auth_headers(token),
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
             ) as response:
                 data = await response.json()
-                _LOGGER.debug("set_target_temperatures response: %s", data)
+                _LOGGER.info("set_target_temperatures response: %s", data)
                 return data.get("ok") == 1
                 
+        except asyncio.TimeoutError:
+            _LOGGER.warning("set_target_temperatures timeout - API yanıt vermiyor")
+            return False
         except aiohttp.ClientError as err:
-            raise CosaAPIError(f"Bağlantı hatası: {err}") from err
+            _LOGGER.error("set_target_temperatures error: %s", err)
+            return False
 
     async def set_combi_settings(
         self, endpoint_id: str, 
         child_lock: bool,
-        heating: bool = True,
+        combi_settings: Optional[dict] = None,
         token: Optional[str] = None
     ) -> bool:
-        """Kombi ayarlarını (çocuk kilidi, ısıtma) ayarla."""
+        """Kombi ayarlarını (çocuk kilidi, ısıtma, PID ayarları) ayarla."""
         session = await self._get_session()
         url = f"{API_BASE_URL}{ENDPOINT_SET_COMBI_SETTINGS}"
+        
+        # combiSettings'ten cooling ve childLock'ı çıkar (API kabul etmiyor)
+        settings = {}
+        if combi_settings:
+            for key, value in combi_settings.items():
+                if key not in ["cooling", "childLock"]:
+                    settings[key] = value
+        
+        # heating yoksa varsayılan true
+        if "heating" not in settings:
+            settings["heating"] = True
+        
+        # childLock ayrı bir parametre olarak
         payload = {
             "endpoint": endpoint_id,
-            "combiSettings": {
-                "childLock": child_lock,
-                "heating": heating
-            }
+            "childLock": child_lock,
+            "combiSettings": settings
         }
         
-        _LOGGER.debug("set_combi_settings payload: %s", payload)
+        _LOGGER.info("🔒 Çocuk kilidi API isteği: %s", payload)
         
         try:
             async with session.post(
@@ -238,11 +255,30 @@ class CosaAPI:
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
             ) as response:
                 data = await response.json()
-                _LOGGER.debug("set_combi_settings response: %s", data)
+                _LOGGER.info("✅ Çocuk kilidi API yanıtı: %s", data)
                 return data.get("ok") == 1
                 
+        except asyncio.TimeoutError:
+            _LOGGER.warning("⏱️ Çocuk kilidi API timeout")
+            return False
         except aiohttp.ClientError as err:
-            _LOGGER.error("set_combi_settings error: %s", err)
+            _LOGGER.error("❌ Çocuk kilidi API hatası: %s", err)
+            return False
+        
+        try:
+            async with session.post(
+                url, json=payload, headers=self._get_auth_headers(token),
+                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
+            ) as response:
+                data = await response.json()
+                _LOGGER.info("✅ Çocuk kilidi API yanıtı: %s", data)
+                return data.get("ok") == 1
+                
+        except asyncio.TimeoutError:
+            _LOGGER.warning("⏱️ Çocuk kilidi API timeout")
+            return False
+        except aiohttp.ClientError as err:
+            _LOGGER.error("❌ Çocuk kilidi API hatası: %s", err)
             return False
 
     async def set_device_settings(
@@ -265,7 +301,7 @@ class CosaAPI:
             if open_window_enable:
                 payload["openWindowDuration"] = open_window_duration
         
-        _LOGGER.debug("set_device_settings payload: %s", payload)
+        _LOGGER.info("⚙️ Cihaz ayarları API isteği: %s", payload)
         
         try:
             async with session.post(
@@ -273,11 +309,14 @@ class CosaAPI:
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
             ) as response:
                 data = await response.json()
-                _LOGGER.debug("set_device_settings response: %s", data)
+                _LOGGER.info("✅ Cihaz ayarları API yanıtı: %s", data)
                 return data.get("ok") == 1
                 
+        except asyncio.TimeoutError:
+            _LOGGER.warning("⏱️ Cihaz ayarları API timeout")
+            return False
         except aiohttp.ClientError as err:
-            _LOGGER.error("set_device_settings error: %s", err)
+            _LOGGER.error("❌ Cihaz ayarları API hatası: %s", err)
             return False
 
     async def get_reports(self, endpoint_id: str, token: Optional[str] = None) -> dict[str, Any]:

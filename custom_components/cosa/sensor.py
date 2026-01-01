@@ -216,7 +216,7 @@ class CosaModeSensor(CosaBaseSensor):
         mode_names = {
             "manual": "Manuel",
             "auto": "Otomatik",
-            "schedule": "Haftalık Program",
+            "schedule": "Haftalık",
         }
         return mode_names.get(mode, mode)
 

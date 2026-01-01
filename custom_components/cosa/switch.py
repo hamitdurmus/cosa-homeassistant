@@ -25,67 +25,10 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
     
     entities = [
-        CosaChildLockSwitch(coordinator, config_entry),
         CosaOpenWindowSwitch(coordinator, config_entry),
     ]
     
     async_add_entities(entities)
-
-
-class CosaChildLockSwitch(CoordinatorEntity, SwitchEntity):
-    """Çocuk Kilidi Switch."""
-
-    _attr_has_entity_name = True
-    _attr_device_class = SwitchDeviceClass.SWITCH
-    _attr_icon = "mdi:lock-outline"
-
-    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_child_lock"
-        self._attr_name = "Çocuk Kilidi"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, config_entry.entry_id)},
-        )
-        self._optimistic_state: bool | None = None
-
-    @property
-    def _combi_settings(self) -> dict:
-        if self.coordinator.data:
-            return self.coordinator.data.get("endpoint", {}).get("combiSettings", {})
-        return {}
-
-    @property
-    def is_on(self) -> bool:
-        """Switch açık mı."""
-        if self._optimistic_state is not None:
-            return self._optimistic_state
-        return self._combi_settings.get("childLock", False)
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Coordinator güncellemesini işle."""
-        real_state = self._combi_settings.get("childLock", False)
-        if self._optimistic_state is not None and real_state == self._optimistic_state:
-            self._optimistic_state = None
-        self.async_write_ha_state()
-
-    async def async_turn_on(self, **kwargs) -> None:
-        """Çocuk kilidini aç."""
-        self._optimistic_state = True
-        self.async_write_ha_state()
-        result = await self.coordinator.async_set_child_lock(True)
-        if not result:
-            self._optimistic_state = None
-            self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs) -> None:
-        """Çocuk kilidini kapat."""
-        self._optimistic_state = False
-        self.async_write_ha_state()
-        result = await self.coordinator.async_set_child_lock(False)
-        if not result:
-            self._optimistic_state = None
-            self.async_write_ha_state()
 
 
 class CosaOpenWindowSwitch(CoordinatorEntity, SwitchEntity):
@@ -127,18 +70,36 @@ class CosaOpenWindowSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs) -> None:
         """Açık pencere algılamayı aç."""
+        _LOGGER.info("🪟 Açık pencere algılama açılıyor...")
         self._optimistic_state = True
         self.async_write_ha_state()
-        result = await self.coordinator.async_set_open_window(True)
-        if not result:
+        try:
+            result = await self.coordinator.async_set_open_window(True)
+            if result:
+                _LOGGER.info("✅ Açık pencere algılama açıldı")
+            else:
+                _LOGGER.warning("⚠️ Açık pencere API yanıtı başarısız")
+                self._optimistic_state = None
+                self.async_write_ha_state()
+        except Exception as err:
+            _LOGGER.error("❌ Açık pencere açma hatası: %s", err)
             self._optimistic_state = None
             self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Açık pencere algılamayı kapat."""
+        _LOGGER.info("🪟 Açık pencere algılama kapatılıyor...")
         self._optimistic_state = False
         self.async_write_ha_state()
-        result = await self.coordinator.async_set_open_window(False)
-        if not result:
+        try:
+            result = await self.coordinator.async_set_open_window(False)
+            if result:
+                _LOGGER.info("✅ Açık pencere algılama kapatıldı")
+            else:
+                _LOGGER.warning("⚠️ Açık pencere API yanıtı başarısız")
+                self._optimistic_state = None
+                self.async_write_ha_state()
+        except Exception as err:
+            _LOGGER.error("❌ Açık pencere kapatma hatası: %s", err)
             self._optimistic_state = None
             self.async_write_ha_state()

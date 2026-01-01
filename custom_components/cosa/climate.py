@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -131,6 +132,23 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
         # Optimistic değer varsa onu göster
         if self._optimistic_target_temp is not None:
             return self._optimistic_target_temp
+        
+        # Mevcut mod ve option'a göre doğru sıcaklığı döndür
+        mode = self._endpoint.get("mode")
+        option = self._endpoint.get("option")
+        
+        # Manuel moddaysa option'a göre sıcaklık
+        if mode == MODE_MANUAL:
+            if option == OPTION_HOME:
+                return self._endpoint.get("homeTemperature")
+            elif option == OPTION_AWAY:
+                return self._endpoint.get("awayTemperature")
+            elif option == OPTION_SLEEP:
+                return self._endpoint.get("sleepTemperature")
+            elif option == OPTION_CUSTOM:
+                return self._endpoint.get("customTemperature")
+        
+        # Diğer modlarda targetTemperature kullan
         return self._endpoint.get("targetTemperature")
 
     @property
@@ -232,23 +250,48 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
         self.async_write_ha_state()
         
         if hvac_mode == HVACMode.OFF:
-            await self.coordinator.async_set_mode(MODE_MANUAL, OPTION_FROZEN)
+            result = await self.coordinator.async_set_mode(MODE_MANUAL, OPTION_FROZEN)
         else:
-            await self.coordinator.async_set_mode(MODE_MANUAL, OPTION_HOME)
+            result = await self.coordinator.async_set_mode(MODE_MANUAL, OPTION_HOME)
+        
+        if not result:
+            # API başarısız, optimistic değeri temizle
+            self._optimistic_hvac_mode = None
+            self._optimistic_preset = None
+            self.async_write_ha_state()
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        # Optimistic update
+        # Optimistic update - preset ve sıcaklık
         self._optimistic_preset = preset_mode
         self._optimistic_hvac_mode = HVACMode.HEAT  # Preset seçildiğinde ısıtma açık
+        
+        # Preset'e göre sıcaklığı da hemen güncelle
+        if preset_mode == PRESET_EVDE:
+            self._optimistic_target_temp = self._endpoint.get("homeTemperature", 21)
+        elif preset_mode == PRESET_UYKU:
+            self._optimistic_target_temp = self._endpoint.get("sleepTemperature", 19)
+        elif preset_mode == PRESET_DISARI:
+            self._optimistic_target_temp = self._endpoint.get("awayTemperature", 15)
+        elif preset_mode == PRESET_MANUEL:
+            self._optimistic_target_temp = self._endpoint.get("customTemperature", 20)
+        elif preset_mode in (PRESET_OTOMATIK, PRESET_HAFTALIK):
+            self._optimistic_target_temp = self._endpoint.get("targetTemperature", 21)
+        
         self.async_write_ha_state()
         
         if preset_mode == PRESET_HAFTALIK:
-            await self.coordinator.async_set_mode(MODE_SCHEDULE)
+            result = await self.coordinator.async_set_mode(MODE_SCHEDULE)
         elif preset_mode == PRESET_OTOMATIK:
-            await self.coordinator.async_set_mode(MODE_AUTO)
+            result = await self.coordinator.async_set_mode(MODE_AUTO)
         else:
             option = PRESET_TO_OPTION.get(preset_mode, OPTION_HOME)
-            await self.coordinator.async_set_mode(MODE_MANUAL, option)
+            result = await self.coordinator.async_set_mode(MODE_MANUAL, option)
+        
+        if not result:
+            # API başarısız, optimistic değerleri temizle
+            self._optimistic_preset = None
+            self._optimistic_hvac_mode = None
+            self.async_write_ha_state()
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         temperature = kwargs.get(ATTR_TEMPERATURE)
@@ -277,7 +320,18 @@ class CosaClimate(CoordinatorEntity, ClimateEntity):
         else:
             home = temperature
         
-        await self.coordinator.async_set_temperatures(home, away, sleep, custom)
+        try:
+            result = await self.coordinator.async_set_temperatures(home, away, sleep, custom)
+            if not result:
+                # API başarısız ama timeout değilse temizle
+                _LOGGER.warning("Sıcaklık ayarı başarısız, optimistic değer korunuyor")
+        except asyncio.TimeoutError:
+            # Timeout - optimistic değeri koru, arka planda işlenebilir
+            _LOGGER.warning("API timeout - sıcaklık ayarı arka planda işleniyor")
+        except Exception as err:
+            _LOGGER.error("Sıcaklık ayarı hatası: %s", err)
+            self._optimistic_target_temp = None
+            self.async_write_ha_state()
 
     async def async_turn_on(self) -> None:
         await self.async_set_hvac_mode(HVACMode.HEAT)

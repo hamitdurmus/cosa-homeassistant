@@ -10,7 +10,7 @@ CONF_ENDPOINT_ID = "endpoint_id"
 
 # API Konfigürasyonu
 API_BASE_URL = "https://kiwi-api.nuvia.com.tr"
-API_TIMEOUT = 30
+API_TIMEOUT = 60
 
 # API Endpoint'leri
 ENDPOINT_LOGIN = "/api/users/login"
@@ -45,9 +45,9 @@ OPTION_FROZEN = "frozen"
 PRESET_HOME = "home"
 PRESET_SLEEP = "sleep"
 PRESET_AWAY = "away"
-PRESET_CUSTOM = "custom"
-PRESET_AUTO = "auto"
-PRESET_SCHEDULE = "schedule"
+PRESET_MANUAL = "manual"
+PRESET_AUTOMATIC = "automatic"
+PRESET_WEEKLY = "weekly"
 
 # Sıcaklık Limitleri
 MIN_TEMP = 5.0

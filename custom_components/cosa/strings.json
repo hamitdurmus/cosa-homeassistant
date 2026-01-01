@@ -37,9 +37,9 @@
               "home": "Evde",
               "sleep": "Uyku",
               "away": "Dışarı",
-              "custom": "Manuel",
-              "auto": "Otomatik",
-              "schedule": "Haftalık"
+              "eco": "Manuel",
+              "boost": "Otomatik",
+              "activity": "Haftalık"
             }
           }
         }
@@ -110,14 +110,11 @@
       },
       "open_window": {
         "name": "Açık Pencere"
-      },
-      "child_lock_sensor": {
-        "name": "Çocuk Kilidi Durumu"
       }
     },
     "switch": {
-      "child_lock": {
-        "name": "Çocuk Kilidi"
+      "open_window": {
+        "name": "Açık Pencere Algılama"
       }
     }
   },

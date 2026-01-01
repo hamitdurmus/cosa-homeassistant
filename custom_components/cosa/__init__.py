@@ -1,7 +1,8 @@
-"""COSA Smart Termostat Entegrasyonu."""
+"""COSA Smart Termostat Entegrasyonu - Stable Polling Version."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 from typing import Any, Optional
@@ -13,9 +14,12 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import CosaAPI, CosaAPIError
-from .const import DOMAIN, UPDATE_INTERVAL
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+# Stabil polling - WebSocket problemi çözülünce eklenecek
+UPDATE_INTERVAL = timedelta(seconds=15)  # 15 saniye optimal
 
 PLATFORMS = [Platform.CLIMATE, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH, Platform.NUMBER]
 
@@ -39,6 +43,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     token = login_result.get("token")
     endpoint_id = entry.data.get("endpoint_id")
     
+    # Data fetch fonksiyonu
     async def async_update_data():
         """Veriyi API'den al."""
         try:
@@ -58,6 +63,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except CosaAPIError as err:
             raise UpdateFailed(f"API hatası: {err}") from err
     
+    # Coordinator oluştur - stabil polling
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
@@ -73,13 +79,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.token = token
     coordinator.endpoint_id = endpoint_id
     
-    def _is_heating_on() -> bool:
-        """Mevcut ısıtma durumunu kontrol et."""
-        if coordinator.data:
-            combi_settings = coordinator.data.get("endpoint", {}).get("combiSettings", {})
-            return combi_settings.get("heating", True)
-        return True
-    
     def _get_current_calibration() -> float:
         """Mevcut kalibrasyon değerini al."""
         if coordinator.data:
@@ -92,7 +91,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return coordinator.data.get("endpoint", {}).get("openWindowEnable", False)
         return False
     
-    coordinator._is_heating_on = _is_heating_on
     coordinator._get_current_calibration = _get_current_calibration
     coordinator._is_open_window_enabled = _is_open_window_enabled
     
@@ -105,10 +103,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     async def async_set_temperatures(home: float, away: float, sleep: float, custom: float) -> bool:
         """Tüm sıcaklıkları ayarla."""
-        result = await api.set_target_temperatures(endpoint_id, home, away, sleep, custom, token)
-        if result:
-            await coordinator.async_request_refresh()
-        return result
+        _LOGGER.info("🔧 Sıcaklık ayarlanıyor: home=%s, away=%s, sleep=%s, custom=%s", 
+                     home, away, sleep, custom)
+        
+        try:
+            result = await api.set_target_temperatures(endpoint_id, home, away, sleep, custom, token)
+            _LOGGER.info("API sonuç: %s", result)
+            
+            if result:
+                # Kısa bir bekleme sonrası refresh - API'nin işlemesi için
+                await asyncio.sleep(1)
+                await coordinator.async_request_refresh()
+            
+            return result
+        except Exception as err:
+            _LOGGER.error("Sıcaklık ayarlama hatası: %s", err)
+            return False
     
     async def async_set_preset_temperature(preset: str, temperature: float) -> bool:
         """Preset sıcaklığını ayarla."""
@@ -128,14 +138,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             token
         )
         if result:
-            await coordinator.async_request_refresh()
-        return result
-    
-    async def async_set_child_lock(enabled: bool) -> bool:
-        """Çocuk kilidini ayarla."""
-        heating = _is_heating_on()
-        result = await api.set_combi_settings(endpoint_id, enabled, heating, token)
-        if result:
+            await asyncio.sleep(1)
             await coordinator.async_request_refresh()
         return result
     
@@ -170,7 +173,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.async_set_mode = async_set_mode
     coordinator.async_set_temperatures = async_set_temperatures
     coordinator.async_set_preset_temperature = async_set_preset_temperature
-    coordinator.async_set_child_lock = async_set_child_lock
     coordinator.async_set_open_window = async_set_open_window
     coordinator.async_set_calibration = async_set_calibration
     
